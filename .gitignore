@@ -1,0 +1,3 @@
+*.shell-extension.zip
+schemas/gschemas.compiled
+**/gschemas.compiled

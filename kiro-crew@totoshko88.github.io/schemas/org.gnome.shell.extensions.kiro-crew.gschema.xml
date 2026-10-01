@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="kiro-crew">
+  <schema id="org.gnome.shell.extensions.kiro-crew"
+          path="/org/gnome/shell/extensions/kiro-crew/">
+
+    <key name="endpoint" type="s">
+      <default>'http://localhost:5476'</default>
+      <summary>Gateway base URL</summary>
+      <description>Base URL of the Kiro Crew gateway dashboard, e.g. http://localhost:5476</description>
+    </key>
+
+    <key name="endpoints" type="as">
+      <default>['http://localhost:5476']</default>
+      <summary>Saved endpoints</summary>
+      <description>List of gateway base URLs the user can switch between from the menu.</description>
+    </key>
+
+    <key name="token" type="s">
+      <default>''</default>
+      <summary>Dashboard access token</summary>
+      <description>Token used to authenticate against the gateway (passed as ?token=). The extension cannot mint this; paste a token obtained from the dashboard.</description>
+    </key>
+
+    <key name="browser" type="s">
+      <default>''</default>
+      <summary>Browser application id</summary>
+      <description>Desktop file id of the browser to open links with (e.g. firefox.desktop). Empty = system default handler.</description>
+    </key>
+
+    <key name="max-sessions" type="i">
+      <default>10</default>
+      <range min="1" max="10"/>
+      <summary>Recent sessions shown</summary>
+      <description>How many recent sessions to list in the dropdown menu (1-10).</description>
+    </key>
+
+    <key name="show-previews" type="b">
+      <default>true</default>
+      <summary>Show message previews</summary>
+      <description>Show a short preview of the last message under each session.</description>
+    </key>
+
+    <key name="poll-interval" type="i">
+      <default>15</default>
+      <range min="5" max="300"/>
+      <summary>Fallback poll interval (seconds)</summary>
+      <description>How often to poll /api/status when the WebSocket is unavailable.</description>
+    </key>
+
+  </schema>
+</schemalist>

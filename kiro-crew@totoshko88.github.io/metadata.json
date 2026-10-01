@@ -1,0 +1,10 @@
+{
+    "uuid": "kiro-crew@totoshko88.github.io",
+    "name": "Kiro Crew",
+    "description": "Top-bar indicator for the local Kiro Crew gateway. The icon changes color with live agent activity (idle / busy / needs attention / problem), lists recent sessions, and opens the dashboard in your browser.",
+    "shell-version": [ "45", "46", "47", "48", "49", "50" ],
+    "url": "https://github.com/totoshko88/kiro-crew-gnome",
+    "settings-schema": "org.gnome.shell.extensions.kiro-crew",
+    "gettext-domain": "kiro-crew",
+    "version-name": "0.1.0"
+}

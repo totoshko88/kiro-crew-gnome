@@ -1,0 +1,47 @@
+/* Kiro Crew indicator — status tints.
+ * symbolic icons inherit color via -st-icon-style: symbolic + color. */
+
+.kiro-crew-icon {
+    -st-icon-style: symbolic;
+}
+
+.kiro-crew-idle {
+    color: inherit;
+}
+
+.kiro-crew-busy {
+    color: #3b82f6; /* blue — matches the gateway "working" board color */
+}
+
+.kiro-crew-attention {
+    color: #f59e0b; /* amber — matches the gateway "review" board color */
+}
+
+.kiro-crew-error {
+    color: #ef4444; /* red */
+}
+
+/* Status dots in the session list. */
+.kiro-crew-dot {
+    margin-left: 8px;
+}
+
+.kiro-crew-dot.kiro-crew-idle {
+    color: rgba(255, 255, 255, 0.25);
+}
+
+.kiro-crew-dot.kiro-crew-busy {
+    color: #3b82f6;
+}
+
+.kiro-crew-dot.kiro-crew-attention {
+    color: #f59e0b;
+}
+
+.kiro-crew-dot.kiro-crew-error {
+    color: #ef4444;
+}
+
+.kiro-crew-header {
+    font-weight: bold;
+}

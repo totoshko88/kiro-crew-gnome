@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <g fill="#2e3436">
+    <!-- ghost silhouette: Kiro mascot -->
+    <path d="M8 1.5c-2.6 0-4.5 2-4.5 4.6v6.9l1.4-1.1 1.3 1.1 1.3-1.1 1.3 1.1 1.3-1.1 1.4 1.1V6.1C12.5 3.5 10.6 1.5 8 1.5z"/>
+    <circle cx="6.3" cy="6.2" r="0.9" fill="#ffffff"/>
+    <circle cx="9.7" cy="6.2" r="0.9" fill="#ffffff"/>
+  </g>
+</svg>
