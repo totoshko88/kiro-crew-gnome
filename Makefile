@@ -46,12 +46,16 @@ disable:
 test:
 	dbus-run-session gnome-shell --nested --wayland
 
+# Build the distributable zip. We use plain `zip` rather than
+# `gnome-extensions pack` so CI runners don't need the full gnome-shell package
+# (the CLI isn't in gnome-shell-common — that was Error 127). The archive layout
+# matches pack: the extension's files sit at the ZIP root, not under a subdir.
+# Both the gschema.xml (required by EGO review) and the compiled schema are
+# included.
 pack: schemas
-	gnome-extensions pack $(SRC) \
-		--extra-source=lib \
-		--extra-source=icons \
-		--force \
-		--out-dir=.
+	rm -f $(UUID).shell-extension.zip
+	cd $(SRC) && zip -qr ../$(UUID).shell-extension.zip .
+	@echo "built $(UUID).shell-extension.zip"
 
 clean:
 	rm -f $(SRC)/schemas/gschemas.compiled

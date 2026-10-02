@@ -13,20 +13,20 @@ import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 
 import {GatewayClient} from './lib/client.js';
 import {
-    STATE, ICON_NAME, STYLE_CLASS, aggregateState, slotState, targetSlotKey, slotName,
+    STATE, ICON_NAME, STYLE_CLASS, aggregateState, slotState, targetSlotKey, slotName
 } from './lib/state.js';
 
 // gettext() may only be called from within the extension lifecycle, never at
 // module-evaluation time. Resolve labels lazily so _() runs at render time.
 function stateLabel(state) {
     switch (state) {
-    case 'offline': return _('Gateway offline');
-    case 'auth': return _('Token expired — update in Settings');
-    case 'error': return _('Problem — attention needed');
-    case 'attention': return _('Waiting for you');
-    case 'busy': return _('Working…');
-    case 'idle': return _('Idle');
-    default: return state;
+        case 'offline': return _('Gateway offline');
+        case 'auth': return _('Token expired — update in Settings');
+        case 'error': return _('Problem — attention needed');
+        case 'attention': return _('Waiting for you');
+        case 'busy': return _('Working…');
+        case 'idle': return _('Idle');
+        default: return state;
     }
 }
 
@@ -35,7 +35,7 @@ const DOT_CLASS = {
     attention: 'kiro-crew-dot kiro-crew-attention',
     busy: 'kiro-crew-dot kiro-crew-busy',
     idle: 'kiro-crew-dot kiro-crew-idle',
-    offline: 'kiro-crew-dot kiro-crew-error',
+    offline: 'kiro-crew-dot kiro-crew-error'
 };
 
 const Indicator = class {
@@ -52,7 +52,7 @@ const Indicator = class {
 
         this._icon = new St.Icon({
             gicon: this._gicon(ICON_NAME.offline),
-            style_class: STYLE_CLASS.offline,
+            style_class: STYLE_CLASS.offline
         });
         this.button.add_child(this._icon);
 
@@ -70,17 +70,17 @@ const Indicator = class {
 
         this._client = new GatewayClient(() => ({
             endpoint: this._settings.get_string('endpoint'),
-            token: this._settings.get_string('token'),
+            token: this._settings.get_string('token')
         }));
         this._client.connect({
-            onSlots: (slots) => this._onSlots(slots),
-            onNotification: (n) => this._onNotification(n),
-            onOnline: (ok) => this._onOnline(ok),
-            onAuthError: (bad) => {
+            onSlots: slots => this._onSlots(slots),
+            onNotification: n => this._onNotification(n),
+            onOnline: ok => this._onOnline(ok),
+            onAuthError: bad => {
                 this._recompute();
                 if (bad)
                     this._tryLocalToken();
-            },
+            }
         });
 
         this._settingsChangedId = this._settings.connect('changed', (_s, key) => {
@@ -109,14 +109,14 @@ const Indicator = class {
             return;
         this._mintingToken = true;
         this._client.fetchLocalToken()
-            .then((token) => {
+            .then(token => {
                 if (token && token !== this._settings.get_string('token')) {
                     // Writing the setting triggers the 'changed' handler, which
                     // reconnects the client with the new token.
                     this._settings.set_string('token', token);
                 }
             })
-            .catch((e) => logError(e, 'kiro-crew: local token fetch failed'))
+            .catch(e => logError(e, 'kiro-crew: local token fetch failed'))
             .finally(() => {
                 this._mintingToken = false;
             });
@@ -133,7 +133,7 @@ const Indicator = class {
         const menu = this.button.menu;
 
         this._header = new PopupMenu.PopupMenuItem('', {
-            reactive: false, style_class: 'kiro-crew-header',
+            reactive: false, style_class: 'kiro-crew-header'
         });
         menu.addMenuItem(this._header);
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -158,7 +158,7 @@ const Indicator = class {
         settings.connect('activate', () => {
             const p = this._ext.openPreferences();
             if (p && typeof p.catch === 'function')
-                p.catch((e) => logError(e, 'kiro-crew: openPreferences failed'));
+                p.catch(e => logError(e, 'kiro-crew: openPreferences failed'));
         });
         menu.addMenuItem(settings);
 
@@ -198,7 +198,7 @@ const Indicator = class {
     _refreshSessions() {
         const max = this._settings.get_int('max-sessions');
         const wantPreview = this._settings.get_boolean('show-previews');
-        this._client.fetchSessions(max, wantPreview).then((data) => {
+        this._client.fetchSessions(max, wantPreview).then(data => {
             this._renderSessions(data?.sessions ?? [], wantPreview);
         });
     }
@@ -207,14 +207,14 @@ const Indicator = class {
         this._sessionSection.removeAll();
         if (!this._client.online) {
             const item = new PopupMenu.PopupMenuItem(_('Gateway offline'), {
-                reactive: false,
+                reactive: false
             });
             this._sessionSection.addMenuItem(item);
             return;
         }
         if (sessions.length === 0) {
             const item = new PopupMenu.PopupMenuItem(_('No recent sessions'), {
-                reactive: false,
+                reactive: false
             });
             this._sessionSection.addMenuItem(item);
             return;
@@ -222,7 +222,7 @@ const Indicator = class {
         // /api/sessions keys carry a surface prefix ("dashboard_chat-8-…"),
         // while live ws slot keys are the bare id ("chat-8-…"). Normalize both
         // through slotName() so the status dot matches the live slot.
-        const liveByKey = new Map(this._slots.map((s) => [slotName(s.key), s]));
+        const liveByKey = new Map(this._slots.map(s => [slotName(s.key), s]));
         for (const sess of sessions) {
             const title = sess.title || sess.key || _('(untitled)');
             const item = new PopupMenu.PopupMenuItem(title);
@@ -234,7 +234,7 @@ const Indicator = class {
                 style_class: DOT_CLASS[st] ?? DOT_CLASS.idle,
                 icon_size: 10,
                 x_align: Clutter.ActorAlign.END,
-                x_expand: true,
+                x_expand: true
             });
             item.add_child(dot);
 
@@ -277,7 +277,7 @@ const Indicator = class {
             online: this._client.online,
             slots: this._slots,
             criticalNotice: this._criticalNotice,
-            authError: this._client.authError,
+            authError: this._client.authError
         });
         // A busy/idle recompute clears a stale critical flag once the gateway
         // reports healthy slots again.
@@ -339,7 +339,7 @@ const Indicator = class {
             GLib.PRIORITY_DEFAULT, interval, () => {
                 // Only poll as a liveness fallback when the WS is down.
                 if (!this._client.online) {
-                    this._client.fetchStatus().then((s) => {
+                    this._client.fetchStatus().then(s => {
                         if (s)
                             this._client.reconnectNow();
                     });
@@ -352,14 +352,14 @@ const Indicator = class {
         if (!this._notifSource) {
             this._notifSource = new MessageTray.Source({
                 title: 'Kiro Crew',
-                iconName: ICON_NAME.error,
+                iconName: ICON_NAME.error
             });
             Main.messageTray.add(this._notifSource);
         }
         const n = new MessageTray.Notification({
             source: this._notifSource,
             title,
-            body,
+            body
         });
         this._notifSource.addNotification(n);
     }

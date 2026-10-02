@@ -28,7 +28,9 @@ export default [
                 global: 'readonly',
                 imports: 'readonly',
                 pkg: 'readonly',
-                ARGV: 'readonly'
+                ARGV: 'readonly',
+                TextDecoder: 'readonly',
+                TextEncoder: 'readonly'
             }
         },
         rules: {

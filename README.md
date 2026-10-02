@@ -18,6 +18,7 @@ glance, without opening a single browser tab:
 - 🔵 **blue** — an agent is working
 - 🟡 **amber** — an agent stopped and needs *you* (a question or an approval)
 - 🔴 **red** — something broke, or the gateway is down
+- 🔴 **dim red** — your access token expired (just refetch one)
 - ⚪ **grey** — all quiet
 
 **One click takes you straight to the session that wants you** — not the home

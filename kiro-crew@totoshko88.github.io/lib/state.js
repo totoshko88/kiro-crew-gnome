@@ -18,7 +18,7 @@ export const STATE = Object.freeze({
     ERROR: 'error',
     ATTENTION: 'attention',
     BUSY: 'busy',
-    IDLE: 'idle',
+    IDLE: 'idle'
 });
 
 // Priority order used to pick the aggregate when several slots disagree.
@@ -28,7 +28,7 @@ const PRIORITY = {
     error: 4,
     attention: 3,
     busy: 2,
-    idle: 1,
+    idle: 1
 };
 
 export const ICON_NAME = Object.freeze({
@@ -37,7 +37,7 @@ export const ICON_NAME = Object.freeze({
     error: 'kiro-crew-error-symbolic',
     attention: 'kiro-crew-attention-symbolic',
     busy: 'kiro-crew-busy-symbolic',
-    idle: 'kiro-crew-idle-symbolic',
+    idle: 'kiro-crew-idle-symbolic'
 });
 
 // CSS style class applied to the St.Icon so stylesheet.css can tint it.
@@ -47,7 +47,7 @@ export const STYLE_CLASS = Object.freeze({
     error: 'kiro-crew-icon kiro-crew-error',
     attention: 'kiro-crew-icon kiro-crew-attention',
     busy: 'kiro-crew-icon kiro-crew-busy',
-    idle: 'kiro-crew-icon kiro-crew-idle',
+    idle: 'kiro-crew-icon kiro-crew-idle'
 });
 
 /** Does this slot's mcp_report describe a failure? Defensive — shape varies. */
@@ -83,7 +83,7 @@ export function slotState(slot) {
  * @param {boolean} o.authError       last connect/request got 401/403
  * @returns {string} one of STATE.*
  */
-export function aggregateState({ online, slots = [], criticalNotice = false, authError = false }) {
+export function aggregateState({online, slots = [], criticalNotice = false, authError = false}) {
     // A bad/expired token is not a gateway fault and not an agent problem.
     // Show the muted "auth" state (dim red) so it reads as "fix your token",
     // not as a hard error or an offline gateway.
@@ -92,7 +92,7 @@ export function aggregateState({ online, slots = [], criticalNotice = false, aut
     if (!online)
         return STATE.OFFLINE;
     let best = STATE.IDLE;
-    const bump = (s) => {
+    const bump = s => {
         if (PRIORITY[s] > PRIORITY[best])
             best = s;
     };
@@ -133,9 +133,9 @@ export function slotName(key) {
 
 export function targetSlotKey(aggregate, slots = []) {
     const want = {
-        [STATE.ERROR]: (s) => slotState(s) === STATE.ERROR,
-        [STATE.ATTENTION]: (s) => slotState(s) === STATE.ATTENTION,
-        [STATE.BUSY]: (s) => slotState(s) === STATE.BUSY,
+        [STATE.ERROR]: s => slotState(s) === STATE.ERROR,
+        [STATE.ATTENTION]: s => slotState(s) === STATE.ATTENTION,
+        [STATE.BUSY]: s => slotState(s) === STATE.BUSY
     }[aggregate];
     if (!want)
         return null;

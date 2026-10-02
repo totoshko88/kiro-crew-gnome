@@ -23,7 +23,7 @@ export class GatewayClient {
      */
     constructor(getConfig) {
         this._getConfig = getConfig;
-        this._session = new Soup.Session({ timeout: 10 });
+        this._session = new Soup.Session({timeout: 10});
         this._ws = null;
         this._wsCancellable = null;
         this._reconnectId = 0;
@@ -43,7 +43,7 @@ export class GatewayClient {
     }
 
     _base() {
-        const { endpoint } = this._getConfig();
+        const {endpoint} = this._getConfig();
         return (endpoint || 'http://localhost:5476').replace(/\/+$/, '');
     }
 
@@ -79,7 +79,7 @@ export class GatewayClient {
         const uri = `${this._base()}/api/token/local`;
         const message = Soup.Message.new('GET', uri);
         message.get_request_headers().append('X-Local-Secret', secret);
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             this._session.send_and_read_async(
                 message, GLib.PRIORITY_DEFAULT, null,
                 (session, result) => {
@@ -100,7 +100,7 @@ export class GatewayClient {
     }
 
     _withToken(url) {
-        const { token } = this._getConfig();
+        const {token} = this._getConfig();
         if (!token)
             return url;
         const sep = url.includes('?') ? '&' : '?';
@@ -179,14 +179,14 @@ export class GatewayClient {
             return;
         }
         switch (frame.type) {
-        case 'slots':
-            this._cb.onSlots?.(Array.isArray(frame.data) ? frame.data : []);
-            break;
-        case 'notification':
-            this._cb.onNotification?.(frame);
-            break;
-        default:
-            break;
+            case 'slots':
+                this._cb.onSlots?.(Array.isArray(frame.data) ? frame.data : []);
+                break;
+            case 'notification':
+                this._cb.onNotification?.(frame);
+                break;
+            default:
+                break;
         }
     }
 
@@ -220,7 +220,7 @@ export class GatewayClient {
     async getJson(path) {
         const uri = this._withToken(`${this._base()}${path}`);
         const message = Soup.Message.new('GET', uri);
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             this._session.send_and_read_async(
                 message, GLib.PRIORITY_DEFAULT, null,
                 (session, result) => {
