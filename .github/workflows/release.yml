@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y glib-2.0 zip gnome-shell-common
+        sudo apt-get install -y glib-2.0 zip
 
     - name: Get version from tag
       id: get_version

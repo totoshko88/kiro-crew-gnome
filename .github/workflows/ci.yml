@@ -109,7 +109,7 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y glib-2.0 zip gnome-shell-common
+          sudo apt-get install -y glib-2.0 zip
 
       - name: Build distribution zip
         run: make pack
