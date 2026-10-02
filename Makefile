@@ -50,11 +50,12 @@ test:
 # `gnome-extensions pack` so CI runners don't need the full gnome-shell package
 # (the CLI isn't in gnome-shell-common — that was Error 127). The archive layout
 # matches pack: the extension's files sit at the ZIP root, not under a subdir.
-# Both the gschema.xml (required by EGO review) and the compiled schema are
-# included.
-pack: schemas
+# Only the gschema.xml source is shipped: for Shell 45+ EGO / gnome-extensions
+# install compile it themselves, and a shipped gschemas.compiled is flagged by
+# review (EGO-P-006). `make install` still compiles for local dev copies.
+pack:
 	rm -f $(UUID).shell-extension.zip
-	cd $(SRC) && zip -qr ../$(UUID).shell-extension.zip .
+	cd $(SRC) && zip -qr ../$(UUID).shell-extension.zip . -x 'schemas/gschemas.compiled'
 	@echo "built $(UUID).shell-extension.zip"
 
 clean:

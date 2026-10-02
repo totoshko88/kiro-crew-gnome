@@ -271,6 +271,18 @@ else
     info "stylesheet.css not found (no custom styling)"
 fi
 
+# The packaged zip must not ship a compiled schema (EGO-P-006, Shell 45+).
+ZIP="$UUID.shell-extension.zip"
+if [ -f "$ZIP" ]; then
+    if unzip -l "$ZIP" 2>/dev/null | grep -q "gschemas.compiled"; then
+        fail "$ZIP ships schemas/gschemas.compiled (EGO-P-006)"
+    else
+        pass "$ZIP does not ship gschemas.compiled"
+    fi
+else
+    info "$ZIP not built, skipping packaged-artifact check (run 'make pack')"
+fi
+
 echo ""
 echo "=== 8. Checking Resource Management ==="
 echo ""
