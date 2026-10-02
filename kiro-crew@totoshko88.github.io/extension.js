@@ -30,6 +30,10 @@ function stateLabel(state) {
     }
 }
 
+// GNOME 46+ MessageTray API (property-object constructors, addNotification).
+const HAS_MODERN_MESSAGE_TRAY =
+    typeof MessageTray.Source.prototype.addNotification === 'function';
+
 const DOT_CLASS = {
     error: 'kiro-crew-dot kiro-crew-error',
     attention: 'kiro-crew-dot kiro-crew-attention',
@@ -47,6 +51,12 @@ const Indicator = class {
         this._criticalNotice = false;
         this._pollId = 0;
         this._notifSource = null;
+        this._notifSourceDestroyId = 0;
+        this._mintingToken = false;
+        // Set in destroy(); async continuations check it so nothing touches
+        // destroyed actors or nulled settings after disable().
+        this._destroyed = false;
+        this._giconCache = new Map();
 
         this.button = new PanelMenu.Button(0.0, 'Kiro Crew', false);
 
@@ -58,7 +68,7 @@ const Indicator = class {
 
         // Left-click opens the relevant target directly, without the menu
         // flashing. We intercept the press and route it ourselves.
-        this.button.connect('button-press-event', (_a, event) => {
+        this._buttonPressId = this.button.connect('button-press-event', (_a, event) => {
             if (event.get_button() === Clutter.BUTTON_PRIMARY) {
                 this._openTarget();
                 return Clutter.EVENT_STOP;
@@ -72,7 +82,7 @@ const Indicator = class {
             endpoint: this._settings.get_string('endpoint'),
             token: this._settings.get_string('token')
         }));
-        this._client.connect({
+        this._client.start({
             onSlots: slots => this._onSlots(slots),
             onNotification: n => this._onNotification(n),
             onOnline: ok => this._onOnline(ok),
@@ -88,6 +98,8 @@ const Indicator = class {
                 this._client.reconnectNow();
             if (key === 'max-sessions' || key === 'show-previews')
                 this._refreshSessions();
+            if (key === 'poll-interval')
+                this._startPoll();
         });
 
         this._startPoll();
@@ -110,6 +122,8 @@ const Indicator = class {
         this._mintingToken = true;
         this._client.fetchLocalToken()
             .then(token => {
+                if (this._destroyed)
+                    return;
                 if (token && token !== this._settings.get_string('token')) {
                     // Writing the setting triggers the 'changed' handler, which
                     // reconnects the client with the new token.
@@ -123,8 +137,13 @@ const Indicator = class {
     }
 
     _gicon(name) {
-        const path = this._ext.dir.get_child('icons').get_child(`${name}.svg`);
-        return Gio.icon_new_for_string(path.get_path());
+        let icon = this._giconCache.get(name);
+        if (!icon) {
+            const path = this._ext.dir.get_child('icons').get_child(`${name}.svg`);
+            icon = Gio.icon_new_for_string(path.get_path());
+            this._giconCache.set(name, icon);
+        }
+        return icon;
     }
 
     // ---- menu ------------------------------------------------------------
@@ -162,7 +181,7 @@ const Indicator = class {
         });
         menu.addMenuItem(settings);
 
-        this.button.menu.connect('open-state-changed', (_m, isOpen) => {
+        this._menuOpenStateId = this.button.menu.connect('open-state-changed', (_m, isOpen) => {
             if (isOpen)
                 this._refreshSessions();
         });
@@ -199,6 +218,8 @@ const Indicator = class {
         const max = this._settings.get_int('max-sessions');
         const wantPreview = this._settings.get_boolean('show-previews');
         this._client.fetchSessions(max, wantPreview).then(data => {
+            if (this._destroyed)
+                return;
             this._renderSessions(data?.sessions ?? [], wantPreview);
         });
     }
@@ -333,14 +354,16 @@ const Indicator = class {
 
     // ---- misc ------------------------------------------------------------
 
+    /** (Re)start the liveness poll; safe to call when the interval changes. */
     _startPoll() {
-        const interval = this._settings.get_int('poll-interval');
+        this._stopPoll();
+        const interval = Math.max(1, this._settings.get_int('poll-interval'));
         this._pollId = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT, interval, () => {
                 // Only poll as a liveness fallback when the WS is down.
                 if (!this._client.online) {
                     this._client.fetchStatus().then(s => {
-                        if (s)
+                        if (s && !this._destroyed)
                             this._client.reconnectNow();
                     });
                 }
@@ -348,37 +371,92 @@ const Indicator = class {
             });
     }
 
-    _notify(title, body) {
-        if (!this._notifSource) {
-            this._notifSource = new MessageTray.Source({
-                title: 'Kiro Crew',
-                iconName: ICON_NAME.error
-            });
-            Main.messageTray.add(this._notifSource);
-        }
-        const n = new MessageTray.Notification({
-            source: this._notifSource,
-            title,
-            body
-        });
-        this._notifSource.addNotification(n);
-    }
-
-    destroy() {
+    _stopPoll() {
         if (this._pollId) {
             GLib.source_remove(this._pollId);
             this._pollId = 0;
         }
+    }
+
+    _ensureNotifSource() {
+        if (this._notifSource)
+            return this._notifSource;
+        // GNOME 46 switched Source/Notification to property objects and
+        // replaced showNotification() with addNotification(); 45 is positional.
+        const source = HAS_MODERN_MESSAGE_TRAY
+            ? new MessageTray.Source({title: 'Kiro Crew', iconName: ICON_NAME.error})
+            : new MessageTray.Source('Kiro Crew', ICON_NAME.error);
+        // The tray destroys the source once its last notification is
+        // dismissed; drop our reference so the next notice makes a fresh one.
+        this._notifSourceDestroyId = source.connect('destroy', () => {
+            this._notifSourceDestroyId = 0;
+            this._notifSource = null;
+        });
+        Main.messageTray.add(source);
+        this._notifSource = source;
+        return source;
+    }
+
+    _notify(title, body) {
+        const source = this._ensureNotifSource();
+        if (HAS_MODERN_MESSAGE_TRAY) {
+            source.addNotification(new MessageTray.Notification({source, title, body}));
+        } else {
+            source.showNotification(new MessageTray.Notification(source, title, body));
+        }
+    }
+
+    _destroyNotifSource() {
+        if (!this._notifSource)
+            return;
+        if (this._notifSourceDestroyId) {
+            this._notifSource.disconnect(this._notifSourceDestroyId);
+            this._notifSourceDestroyId = 0;
+        }
+        this._notifSource.destroy();
+        this._notifSource = null;
+    }
+
+    destroy() {
+        this._destroyed = true;
+        this._stopPoll();
+
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = 0;
         }
+        if (this._buttonPressId) {
+            this.button.disconnect(this._buttonPressId);
+            this._buttonPressId = 0;
+        }
+        if (this._menuOpenStateId) {
+            this.button.menu.disconnect(this._menuOpenStateId);
+            this._menuOpenStateId = 0;
+        }
+
         this._client?.destroy();
         this._client = null;
-        this._notifSource?.destroy();
-        this._notifSource = null;
+
+        this._destroyNotifSource();
+
+        // These are children of the button/menu and would go down with it,
+        // but destroy them explicitly so ownership is unambiguous.
+        this._endpointSub?.destroy();
+        this._endpointSub = null;
+        this._sessionSection?.destroy();
+        this._sessionSection = null;
+        this._header?.destroy();
+        this._header = null;
+        this._icon?.destroy();
+        this._icon = null;
+
         this.button?.destroy();
         this.button = null;
+
+        this._giconCache.clear();
+        this._slots = [];
+        this._settings = null;
+        this._ext = null;
     }
 };
 

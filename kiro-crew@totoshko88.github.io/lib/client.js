@@ -3,7 +3,7 @@
  * notification frames, plain HTTP GETs for /api/status and /api/sessions,
  * with token auth and reconnect backoff. GJS/libsoup3 only.
  *
- * Emits via the callbacks passed to connect():
+ * Emits via the callbacks passed to start():
  *   onSlots(slotsArray)            latest "slots" frame data
  *   onNotification(noticeObject)   a "notification" frame
  *   onOnline(bool)                 reachability changed
@@ -25,7 +25,10 @@ export class GatewayClient {
         this._getConfig = getConfig;
         this._session = new Soup.Session({timeout: 10});
         this._ws = null;
+        this._wsSignalIds = [];
         this._wsCancellable = null;
+        // Cancels in-flight file reads (local secret) on destroy().
+        this._ioCancellable = new Gio.Cancellable();
         this._reconnectId = 0;
         this._backoff = 1;          // seconds, doubles up to _backoffMax
         this._backoffMax = 30;
@@ -49,20 +52,23 @@ export class GatewayClient {
 
     /**
      * Read ~/.kiro/crew/.local_secret (readable only by this user's processes).
-     * Returns the trimmed secret, or '' if unavailable.
+     * Async (never blocks the shell main loop). Resolves to the trimmed
+     * secret, or '' if unavailable or cancelled.
      */
     _readLocalSecret() {
-        try {
-            const path = GLib.build_filenamev(
-                [GLib.get_home_dir(), '.kiro', 'crew', '.local_secret']);
-            const file = Gio.File.new_for_path(path);
-            const [ok, bytes] = file.load_contents(null);
-            if (!ok)
-                return '';
-            return new TextDecoder('utf-8').decode(bytes).trim();
-        } catch {
-            return '';
-        }
+        const path = GLib.build_filenamev(
+            [GLib.get_home_dir(), '.kiro', 'crew', '.local_secret']);
+        const file = Gio.File.new_for_path(path);
+        return new Promise(resolve => {
+            file.load_contents_async(this._ioCancellable, (f, result) => {
+                try {
+                    const [, bytes] = f.load_contents_finish(result);
+                    resolve(DECODER.decode(bytes).trim());
+                } catch {
+                    resolve('');
+                }
+            });
+        });
     }
 
     /**
@@ -73,8 +79,8 @@ export class GatewayClient {
      * process like gnome-shell qualifies). Resolves to the token string, or ''.
      */
     async fetchLocalToken() {
-        const secret = this._readLocalSecret();
-        if (!secret)
+        const secret = await this._readLocalSecret();
+        if (!secret || !this._session)
             return '';
         const uri = `${this._base()}/api/token/local`;
         const message = Soup.Message.new('GET', uri);
@@ -119,28 +125,41 @@ export class GatewayClient {
         this._cb.onOnline?.(v);
     }
 
-    connect(callbacks) {
+    /**
+     * Start the live connection. Named start() (not connect()) so it is not
+     * mistaken for a GObject signal connection.
+     *
+     * @param {object} callbacks see the module header
+     */
+    start(callbacks) {
         this._cb = callbacks || {};
         this._stopped = false;
         this._openWebsocket();
     }
 
     _openWebsocket() {
-        if (this._stopped)
+        if (this._stopped || !this._session)
             return;
         this._closeWebsocket();
         const message = Soup.Message.new('GET', this._wsUri());
-        this._wsCancellable = new Gio.Cancellable();
+        const cancellable = new Gio.Cancellable();
+        this._wsCancellable = cancellable;
         this._session.websocket_connect_async(
             message,
             null,          // origin
             [],            // protocols
             0,             // io priority
-            this._wsCancellable,
+            cancellable,
             (session, result) => {
+                let ws;
                 try {
-                    this._ws = session.websocket_connect_finish(result);
+                    ws = session.websocket_connect_finish(result);
                 } catch (e) {
+                    // Cancelled = superseded by a newer attempt or destroy();
+                    // that attempt owns the state now, so do nothing here.
+                    if (cancellable.is_cancelled() ||
+                        e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                        return;
                     // A 401/403 handshake means the token is bad/expired, not
                     // that the gateway is down — surface it distinctly so the
                     // indicator can show a muted "auth" state, not a hard error.
@@ -151,24 +170,45 @@ export class GatewayClient {
                     this._scheduleReconnect();
                     return;
                 }
+                // Completed, but a newer attempt or destroy() raced us.
+                if (cancellable !== this._wsCancellable || this._stopped) {
+                    try {
+                        ws.close(Soup.WebsocketCloseCode.NORMAL, null);
+                    } catch { /* already gone */ }
+                    return;
+                }
+                this._ws = ws;
                 this._setAuthError(false);
                 this._backoff = 1;
                 this._setOnline(true);
-                this._ws.connect('message', (_c, type, bytes) => {
-                    if (type !== Soup.WebsocketDataType.TEXT)
-                        return;
-                    this._handleFrame(DECODER.decode(bytes.get_data()));
-                });
-                this._ws.connect('closed', () => {
-                    this._setOnline(false);
-                    this._ws = null;
-                    this._scheduleReconnect();
-                });
-                this._ws.connect('error', () => {
-                    this._setOnline(false);
-                });
+                this._wsSignalIds = [
+                    ws.connect('message', (_c, type, bytes) => {
+                        if (type !== Soup.WebsocketDataType.TEXT)
+                            return;
+                        this._handleFrame(DECODER.decode(bytes.get_data()));
+                    }),
+                    ws.connect('closed', () => {
+                        // Only the current socket may drive state; handlers
+                        // of a replaced socket are disconnected beforehand.
+                        this._disconnectWsSignals();
+                        this._ws = null;
+                        this._setOnline(false);
+                        this._scheduleReconnect();
+                    }),
+                    ws.connect('error', () => {
+                        this._setOnline(false);
+                    })
+                ];
             }
         );
+    }
+
+    _disconnectWsSignals() {
+        if (this._ws) {
+            for (const id of this._wsSignalIds)
+                this._ws.disconnect(id);
+        }
+        this._wsSignalIds = [];
     }
 
     _handleFrame(text) {
@@ -209,6 +249,9 @@ export class GatewayClient {
             this._wsCancellable = null;
         }
         if (this._ws) {
+            // Disconnect first so the old socket's async 'closed' cannot
+            // clobber a newer socket or schedule a duplicate reconnect.
+            this._disconnectWsSignals();
             try {
                 this._ws.close(Soup.WebsocketCloseCode.NORMAL, null);
             } catch { /* already gone */ }
@@ -218,6 +261,8 @@ export class GatewayClient {
 
     /** HTTP GET returning parsed JSON, or null on any failure. Async/Promise. */
     async getJson(path) {
+        if (!this._session)
+            return null;
         const uri = this._withToken(`${this._base()}${path}`);
         const message = Soup.Message.new('GET', uri);
         return new Promise(resolve => {
@@ -275,10 +320,15 @@ export class GatewayClient {
 
     destroy() {
         this._stopped = true;
+        // Drop callbacks first: anything that completes during teardown
+        // (cancelled reads, aborted requests) must not reach the indicator.
+        this._cb = {};
         if (this._reconnectId) {
             GLib.source_remove(this._reconnectId);
             this._reconnectId = 0;
         }
+        this._ioCancellable?.cancel();
+        this._ioCancellable = null;
         this._closeWebsocket();
         if (this._session) {
             try {
@@ -286,7 +336,6 @@ export class GatewayClient {
             } catch { /* noop */ }
             this._session = null;
         }
-        this._cb = {};
     }
 }
 

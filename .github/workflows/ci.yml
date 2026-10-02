@@ -88,6 +88,13 @@ jobs:
             exit 1
           fi
 
+          # Synchronous file IO is flagged in shell-process code (EGO-X-004).
+          # prefs.js runs in its own process and is exempt.
+          if grep -nE "\.load_contents\(|file_get_contents\(" "$UUID/extension.js" "$UUID"/lib/*.js; then
+            echo "ERROR: synchronous file IO in shell code (use load_contents_async)"
+            exit 1
+          fi
+
           echo "EGO validation passed"
 
   shexli:
@@ -127,6 +134,11 @@ jobs:
       - name: Run shexli on the packaged extension
         run: |
           ZIP="$UUID.shell-extension.zip"
+          # Shell 45+ packages must not ship a compiled schema (EGO-P-006).
+          if unzip -l "$ZIP" | grep -q "gschemas.compiled"; then
+            echo "ERROR: $ZIP ships schemas/gschemas.compiled"
+            exit 1
+          fi
           echo "== shexli report =="
           shexli "$ZIP" || true
           # Fail only on error-severity findings.

@@ -18,6 +18,10 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
+      with:
+        # Full history + tags: the EGO version bump below reads metadata.json
+        # at every previous v* tag; a shallow clone has no tags, so prev was 0.
+        fetch-depth: 0
 
     - name: Install dependencies
       run: |

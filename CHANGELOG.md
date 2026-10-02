@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1]
+
+Hotfix addressing the EGO review warnings plus lifecycle bugs found along the way.
+
+### Fixed
+
+- The local secret (`~/.kiro/crew/.local_secret`) is now read asynchronously, so the shell main loop never blocks on file IO (EGO-X-004).
+- `disable()` now explicitly destroys and releases every object created in `enable()` (icon, header, session section, endpoint submenu, settings) and disconnects every signal it connected (EGO-L-002, EGO-L-003, EGO-L-005).
+- Network replies that arrive after `disable()` no longer touch destroyed actors or released settings.
+- Reconnecting (endpoint/token change, Reconnect) no longer races the previous WebSocket: its handlers are disconnected before closing, so it can't drop the new socket or schedule a duplicate reconnect. A cancelled handshake is no longer treated as a failure.
+- Critical notifications keep working after the user dismisses them (the destroyed notification source is recreated).
+- Critical notifications on GNOME 45, which uses the older positional MessageTray API.
+- Changing the fallback poll interval in Settings now takes effect without re-enabling the extension.
+
+### Changed
+
+- The release zip no longer ships `schemas/gschemas.compiled`; GNOME 45+ compiles the schema on install (EGO-P-006).
+- CI guards against synchronous file IO in shell code and a compiled schema in the zip; the release workflow fetches tags so the EGO version bump sees previous releases.
+
 ## [0.1.0]
 
 ### Added
