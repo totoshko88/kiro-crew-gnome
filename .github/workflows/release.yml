@@ -76,7 +76,7 @@ jobs:
         ## Requirements
 
         - GNOME Shell 45, 46, 47, 48, 49, or 50
-        - A running Kiro Crew gateway (default http://localhost:5476) and an access token
+        - A running Kiro Crew gateway (default http://localhost:5476). The extension fetches its access token automatically on the same machine; you can also set one in Settings.
         EOF
 
     - name: Bump EGO version in metadata.json (conditional)

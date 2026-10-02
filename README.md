@@ -4,16 +4,11 @@
 
 # Kiro Crew — command your crew from the GNOME top bar 👻
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0)
-[![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--50-blue.svg)](https://www.gnome.org/)
-[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md)
-[![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--50-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml)
 
 **Your AI crew is working right now — do you know what it's doing?**
 
-This extension puts a little ghost in your GNOME top bar that watches your
-whole [Kiro Crew](https://github.com/kirodotdev/kirocrew) and tells you, at a
-glance, without opening a single browser tab:
+This extension puts a little ghost in your GNOME top bar that watches your whole [Kiro Crew](https://github.com/kirodotdev/kirocrew) and tells you, at a glance, without opening a single browser tab:
 
 - 🔵 **blue** — an agent is working
 - 🟡 **amber** — an agent stopped and needs *you* (a question or an approval)
@@ -21,30 +16,21 @@ glance, without opening a single browser tab:
 - 🔴 **dim red** — your access token expired (just refetch one)
 - ⚪ **grey** — all quiet
 
-**One click takes you straight to the session that wants you** — not the home
-page, not the last tab you had open, *the* one that needs attention. It is the
-difference between babysitting a dashboard and running a crew.
+**One click takes you straight to the session that wants you** — not the home page, not the last tab you had open, *the* one that needs attention. It is the difference between babysitting a dashboard and running a crew.
 
 ![Kiro Crew ghost in the GNOME top bar](docs/screen.png)
 
-> New here? Read the **[User Guide](docs/USERGUIDE.md)** — it walks you from zero to a
-> glowing ghost in about five minutes.
+> New here? Read the **[User Guide](docs/USERGUIDE.md)** — it walks you from zero to a glowing ghost in about five minutes.
 
 ## Why you want this
 
-Kiro Crew agents keep working after you close the chat. They run long tasks,
-answer on a schedule, spawn helpers, and wait for approvals — **unattended, on
-your own hardware**. The catch: if nobody's watching, an agent can sit for an
-hour stuck on one yes/no question.
+Kiro Crew agents keep working after you close the chat. They run long tasks, answer on a schedule, spawn helpers, and wait for approvals — **unattended, on your own hardware**. The catch: if nobody's watching, an agent can sit for an hour stuck on one yes/no question.
 
-That is the whole point of this extension. You stop checking the dashboard "just
-in case." The ghost checks for you and only pulls you in when it matters.
+That is the whole point of this extension. You stop checking the dashboard "just in case." The ghost checks for you and only pulls you in when it matters.
 
 ## What you need first: Kiro Crew itself
 
-The extension is a *remote control* — it needs the thing it controls. Kiro Crew
-is a free, open-source workspace that runs AI agents **on your machine**, not in
-someone's cloud. Install it once:
+The extension is a *remote control* — it needs the thing it controls. Kiro Crew is a free, open-source workspace that runs AI agents **on your machine**, not in someone's cloud. Install it once:
 
 ```bash
 # One line. Installs the signed release, no cloning, no build.
@@ -66,14 +52,11 @@ docker run -d --name kirocrew \
   ghcr.io/kirodotdev/kirocrew:stable
 ```
 
-Full install paths (`.deb` / `.rpm` / AppImage, pinning a version, upgrades) are
-in the official [install guide](https://github.com/kirodotdev/kirocrew/blob/main/docs/guides/install.md).
+Full install paths (`.deb` / `.rpm` / AppImage, pinning a version, upgrades) are in the official [install guide](https://github.com/kirodotdev/kirocrew/blob/main/docs/guides/install.md).
 
 ### Why "runs on your machine" actually matters
 
-Letting an AI agent run shell commands, edit files, and hit the network sounds
-scary — and it *should*, if it's a black box in someone else's cloud. Kiro Crew
-is the opposite, and that is the real reason to use it:
+Letting an AI agent run shell commands, edit files, and hit the network sounds scary — and it *should*, if it's a black box in someone else's cloud. Kiro Crew is the opposite, and that is the real reason to use it:
 
 - **It's on your hardware.** Your code, your tokens, your data never leave the
   machine unless you tell them to. The dashboard binds to `localhost` by
@@ -94,8 +77,7 @@ is the opposite, and that is the real reason to use it:
   visible in the dashboard — and now, with this extension, the *state* of it all
   is visible without even opening the dashboard.
 
-So the pitch is simple: **powerful autonomous agents, kept on a short leash, on
-a machine you own — and a ghost in your top bar watching the leash for you.**
+So the pitch is simple: **powerful autonomous agents, kept on a short leash, on a machine you own — and a ghost in your top bar watching the leash for you.**
 
 ## Install the extension
 
@@ -107,11 +89,7 @@ make install
 gnome-extensions enable kiro-crew@totoshko88.github.io
 ```
 
-That's it. On a normal local setup the extension **fetches its own access
-token** on first run (via the gateway's loopback-only local bootstrap — see the
-[User Guide](docs/USERGUIDE.md)), so the ghost usually lights up with no further
-steps. If it doesn't, open **Extensions → Kiro Crew → Settings** and either
-press **Fetch** or paste a token from your dashboard.
+That's it. On a normal local setup the extension **fetches its own access token** on first run (via the gateway's loopback-only local bootstrap — see the [User Guide](docs/USERGUIDE.md)), so the ghost usually lights up with no further steps. If it doesn't, open **Extensions → Kiro Crew → Settings** and either press **Fetch** or paste a token from your dashboard.
 
 ## Requirements
 
@@ -162,8 +140,7 @@ kiro-crew@totoshko88.github.io/
 
 ## Support
 
-[![Donatello](https://img.shields.io/badge/Donatello-Support-ff6b2c)](https://donatello.to/totoshko88)
-[![Monobank](https://img.shields.io/badge/Monobank-UAH-black?logo=monobank)](https://send.monobank.ua/jar/2UgaGcQ3JC)
+[![Donatello](https://img.shields.io/badge/Donatello-Support-ff6b2c)](https://donatello.to/totoshko88) [![Monobank](https://img.shields.io/badge/Monobank-UAH-black?logo=monobank)](https://send.monobank.ua/jar/2UgaGcQ3JC)
 
 ## License
 

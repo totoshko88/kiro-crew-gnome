@@ -4,9 +4,7 @@
 
 # Kiro Crew — User Guide
 
-A top-bar ghost that shows what your whole Kiro Crew is doing and takes you to
-the session that needs you. This guide takes you from nothing to a working,
-glowing ghost, and explains every button along the way.
+A top-bar ghost that shows what your whole Kiro Crew is doing and takes you to the session that needs you. This guide takes you from nothing to a working, glowing ghost, and explains every button along the way.
 
 ---
 
@@ -43,8 +41,7 @@ cd kiro-crew-gnome
 make install
 ```
 
-`make install` compiles the settings schema and copies the extension into
-`~/.local/share/gnome-shell/extensions/`.
+`make install` compiles the settings schema and copies the extension into `~/.local/share/gnome-shell/extensions/`.
 
 Now GNOME has to **reload its extension list**:
 
@@ -66,8 +63,7 @@ A ghost should appear in your top bar.
 
 ## 3. First run — the token
 
-To read your crew's state, the extension needs an **access token** for the
-gateway. You almost never have to deal with this by hand:
+To read your crew's state, the extension needs an **access token** for the gateway. You almost never have to deal with this by hand:
 
 - **Automatic (the normal case).** On first run, if no token is set, the
   extension asks the gateway for one through its **loopback-only local
@@ -90,8 +86,7 @@ gateway. You almost never have to deal with this by hand:
 
 ## 4. Reading the ghost
 
-The icon color is the single most important thing. It's the *worst* thing
-happening across your whole crew, so you always see the thing that matters most:
+The icon color is the single most important thing. It's the *worst* thing happening across your whole crew, so you always see the thing that matters most:
 
 | Color | State | What it means | What to do |
 |-------|-------|---------------|------------|
@@ -160,38 +155,25 @@ gnome-extensions prefs kiro-crew@totoshko88.github.io
 
 ## 7. Choosing a browser (optional)
 
-By default, clicks open your system default browser. If you keep your Kiro Crew
-dashboard logged in in one specific browser, set **Settings → Browser → Open
-links with** to that browser so sessions always open where you're already
-authenticated.
+By default, clicks open your system default browser. If you keep your Kiro Crew dashboard logged in in one specific browser, set **Settings → Browser → Open links with** to that browser so sessions always open where you're already authenticated.
 
 ---
 
 ## 8. Troubleshooting
 
-**No ghost after install.**
-Did you reload the shell? Wayland needs a full log out / log in. Then
-`gnome-extensions enable kiro-crew@totoshko88.github.io`. Check status:
+**No ghost after install.** Did you reload the shell? Wayland needs a full log out / log in. Then `gnome-extensions enable kiro-crew@totoshko88.github.io`. Check status:
 
 ```bash
 gnome-extensions info kiro-crew@totoshko88.github.io
 ```
 
-`State: ACTIVE` is good. `State: ERROR` means it failed to load — see logs
-below. `Enabled: Yes` + `State: INACTIVE` usually clears with a real re-login.
+`State: ACTIVE` is good. `State: ERROR` means it failed to load — see logs below. `Enabled: Yes` + `State: INACTIVE` usually clears with a real re-login.
 
-**Ghost is dim red.**
-Token expired. It should refetch automatically; if not, open **Settings** →
-**Fetch**, or **Open** the dashboard and paste a token.
+**Ghost is dim red.** Token expired. It should refetch automatically; if not, open **Settings** → **Fetch**, or **Open** the dashboard and paste a token.
 
-**Ghost is bright red but the gateway is fine.**
-That's a *crew* signal: a critical notification or an agent error. Click the
-ghost to jump to it, or open the dashboard.
+**Ghost is bright red but the gateway is fine.** That's a *crew* signal: a critical notification or an agent error. Click the ghost to jump to it, or open the dashboard.
 
-**Session dots are all grey even though agents are running.**
-Make sure the gateway is reachable and the token is valid (dim red = token).
-If the live connection is down, the menu falls back to polling and dots can lag;
-use **Reconnect**.
+**Session dots are all grey even though agents are running.** Make sure the gateway is reachable and the token is valid (dim red = token). If the live connection is down, the menu falls back to polling and dots can lag; use **Reconnect**.
 
 **Reading the logs.**
 
@@ -216,8 +198,4 @@ Then reload the shell (log out / in on Wayland).
 
 ## 10. Privacy note
 
-This extension talks **only** to your local gateway over loopback. It reads
-state (sessions, slots, status, notifications) and opens URLs in your browser.
-It never sends your data anywhere else, never calls a mutating gateway endpoint,
-and never mints a credential by the security-gated path — it only uses the
-sanctioned local bootstrap that already trusts same-machine processes.
+This extension talks **only** to your local gateway over loopback. It reads state (sessions, slots, status, notifications) and opens URLs in your browser. It never sends your data anywhere else, never calls a mutating gateway endpoint, and never mints a credential by the security-gated path — it only uses the sanctioned local bootstrap that already trusts same-machine processes.
