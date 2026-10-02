@@ -21,6 +21,12 @@
     color: #ef4444; /* red */
 }
 
+.kiro-crew-auth {
+    /* Dim red: a bad/expired token is a nudge, not an alarm — must not read
+     * like the bright #ef4444 error state. */
+    color: rgba(239, 68, 68, 0.45);
+}
+
 /* Status dots in the session list. */
 .kiro-crew-dot {
     margin-left: 8px;

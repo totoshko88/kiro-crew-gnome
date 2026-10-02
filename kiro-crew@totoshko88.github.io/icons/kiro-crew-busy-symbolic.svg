@@ -1,8 +1,12 @@
-<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <g fill="#2e3436">
-    <path d="M8 1.5c-2.6 0-4.5 2-4.5 4.6v6.9l1.4-1.1 1.3 1.1 1.3-1.1 1.3 1.1 1.3-1.1 1.4 1.1V6.1C12.5 3.5 10.6 1.5 8 1.5z"/>
-    <circle cx="6.3" cy="6.2" r="0.9" fill="#ffffff"/>
-    <circle cx="9.7" cy="6.2" r="0.9" fill="#ffffff"/>
+  <g transform="translate(8,8) scale(0.72) scale(-1,1) translate(-8,-8)">
+  <!-- Busy: ghost + eyes (cutouts) + three "working" dots as cutouts. -->
+  <path fill="#2e3436" fill-rule="evenodd"
+        d="M8 1.5c-2.6 0-4.5 2-4.5 4.6v6.9l1.4-1.1 1.3 1.1 1.3-1.1 1.3 1.1 1.3-1.1 1.4 1.1V6.1C12.5 3.5 10.6 1.5 8 1.5z
+           M6.3 5.3a0.95 0.95 0 1 0 0 1.9 0.95 0.95 0 0 0 0-1.9z
+           M9.7 5.3a0.95 0.95 0 1 0 0 1.9 0.95 0.95 0 0 0 0-1.9z
+           M6.1 9.3a0.6 0.6 0 1 0 0 1.2 0.6 0.6 0 0 0 0-1.2z
+           M8 9.3a0.6 0.6 0 1 0 0 1.2 0.6 0.6 0 0 0 0-1.2z
+           M9.9 9.3a0.6 0.6 0 1 0 0 1.2 0.6 0.6 0 0 0 0-1.2z"/>
   </g>
 </svg>

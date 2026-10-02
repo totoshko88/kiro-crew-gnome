@@ -14,6 +14,7 @@
 
 export const STATE = Object.freeze({
     OFFLINE: 'offline',
+    AUTH: 'auth',
     ERROR: 'error',
     ATTENTION: 'attention',
     BUSY: 'busy',
@@ -22,7 +23,8 @@ export const STATE = Object.freeze({
 
 // Priority order used to pick the aggregate when several slots disagree.
 const PRIORITY = {
-    offline: 5,
+    offline: 6,
+    auth: 5,
     error: 4,
     attention: 3,
     busy: 2,
@@ -31,6 +33,7 @@ const PRIORITY = {
 
 export const ICON_NAME = Object.freeze({
     offline: 'kiro-crew-error-symbolic',
+    auth: 'kiro-crew-error-symbolic',
     error: 'kiro-crew-error-symbolic',
     attention: 'kiro-crew-attention-symbolic',
     busy: 'kiro-crew-busy-symbolic',
@@ -40,6 +43,7 @@ export const ICON_NAME = Object.freeze({
 // CSS style class applied to the St.Icon so stylesheet.css can tint it.
 export const STYLE_CLASS = Object.freeze({
     offline: 'kiro-crew-icon kiro-crew-error',
+    auth: 'kiro-crew-icon kiro-crew-auth',
     error: 'kiro-crew-icon kiro-crew-error',
     attention: 'kiro-crew-icon kiro-crew-attention',
     busy: 'kiro-crew-icon kiro-crew-busy',
@@ -76,9 +80,15 @@ export function slotState(slot) {
  * @param {boolean} o.online          gateway reachable
  * @param {Array}   o.slots           live slot dicts from the ws "slots" frame
  * @param {boolean} o.criticalNotice  a critical notification is active
+ * @param {boolean} o.authError       last connect/request got 401/403
  * @returns {string} one of STATE.*
  */
-export function aggregateState({ online, slots = [], criticalNotice = false }) {
+export function aggregateState({ online, slots = [], criticalNotice = false, authError = false }) {
+    // A bad/expired token is not a gateway fault and not an agent problem.
+    // Show the muted "auth" state (dim red) so it reads as "fix your token",
+    // not as a hard error or an offline gateway.
+    if (authError)
+        return STATE.AUTH;
     if (!online)
         return STATE.OFFLINE;
     let best = STATE.IDLE;
@@ -97,6 +107,30 @@ export function aggregateState({ online, slots = [], criticalNotice = false }) {
  * Pick the slot the icon's left-click should jump to, given the aggregate.
  * Returns the slot key, or null to open the dashboard home instead.
  */
+/**
+ * Derive the dashboard SPA session id (`sid`) from a stored session key.
+ * The dashboard opens a conversation via /chat?sid=<id>. /api/sessions returns
+ * the history stem, where the server's safe-key mapped the surface prefix's ":"
+ * to "_", so the raw key carries a prefix the sid param rejects
+ * ("dashboard_chat-8-… not found"). Strip it to the bare slot id:
+ *   "dashboard:chat-8-1"            -> "chat-8-1"   (live key, ":" form)
+ *   "dashboard_chat-8-1"            -> "chat-8-1"   (history stem, "_" form)
+ *   "dashboard_dashboard_chat-8-1"  -> "chat-8-1"   (resume round-trip stem)
+ *   "slack:1712793600.1"            -> "1712793600.1"
+ * A key with no known prefix is returned unchanged.
+ */
+const SURFACES = 'dashboard|slack|cron|discord|telegram|webex|teams|whatsapp|imessage|feishu';
+export function slotName(key) {
+    let s = String(key ?? '');
+    // Collapse a doubled resume stem first.
+    s = s.replace(/^dashboard_dashboard_/, '');
+    // Strip a "<surface>:" prefix (live key form).
+    s = s.replace(/^[a-z]+:/, '');
+    // Strip a single "<surface>_" safe-key stem (history file form).
+    s = s.replace(new RegExp(`^(${SURFACES})_`), '');
+    return s;
+}
+
 export function targetSlotKey(aggregate, slots = []) {
     const want = {
         [STATE.ERROR]: (s) => slotState(s) === STATE.ERROR,

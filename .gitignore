@@ -1,3 +1,7 @@
 *.shell-extension.zip
 schemas/gschemas.compiled
 **/gschemas.compiled
+node_modules/
+package-lock.json
+build/
+dist/

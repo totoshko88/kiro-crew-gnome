@@ -1,0 +1,15 @@
+{
+  "name": "kiro-crew-gnome",
+  "version": "0.1.0",
+  "description": "GNOME Shell extension: top-bar indicator for the local Kiro Crew gateway",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint \"kiro-crew@totoshko88.github.io/*.js\" \"kiro-crew@totoshko88.github.io/lib/*.js\"",
+    "lint:fix": "eslint --fix \"kiro-crew@totoshko88.github.io/*.js\" \"kiro-crew@totoshko88.github.io/lib/*.js\"",
+    "test": "gjs -m tests/test-state.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.12.0",
+    "eslint": "^9.12.0"
+  }
+}

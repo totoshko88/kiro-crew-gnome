@@ -13,16 +13,22 @@ import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 
 import {GatewayClient} from './lib/client.js';
 import {
-    STATE, ICON_NAME, STYLE_CLASS, aggregateState, slotState, targetSlotKey,
+    STATE, ICON_NAME, STYLE_CLASS, aggregateState, slotState, targetSlotKey, slotName,
 } from './lib/state.js';
 
-const STATE_LABEL = {
-    offline: _('Gateway offline'),
-    error: _('Problem — attention needed'),
-    attention: _('Waiting for you'),
-    busy: _('Working…'),
-    idle: _('Idle'),
-};
+// gettext() may only be called from within the extension lifecycle, never at
+// module-evaluation time. Resolve labels lazily so _() runs at render time.
+function stateLabel(state) {
+    switch (state) {
+    case 'offline': return _('Gateway offline');
+    case 'auth': return _('Token expired — update in Settings');
+    case 'error': return _('Problem — attention needed');
+    case 'attention': return _('Waiting for you');
+    case 'busy': return _('Working…');
+    case 'idle': return _('Idle');
+    default: return state;
+    }
+}
 
 const DOT_CLASS = {
     error: 'kiro-crew-dot kiro-crew-error',
@@ -70,6 +76,11 @@ const Indicator = class {
             onSlots: (slots) => this._onSlots(slots),
             onNotification: (n) => this._onNotification(n),
             onOnline: (ok) => this._onOnline(ok),
+            onAuthError: (bad) => {
+                this._recompute();
+                if (bad)
+                    this._tryLocalToken();
+            },
         });
 
         this._settingsChangedId = this._settings.connect('changed', (_s, key) => {
@@ -81,6 +92,34 @@ const Indicator = class {
 
         this._startPoll();
         this._refreshSessions();
+
+        // If no token is configured yet, try the local bootstrap once so a
+        // fresh install lights up without a manual paste.
+        if (!this._settings.get_string('token').trim())
+            this._tryLocalToken();
+    }
+
+    /**
+     * Try to auto-mint a token via the gateway's loopback-only local bootstrap
+     * and store it. Guarded so overlapping auth errors don't stampede the
+     * endpoint. A failure is silent — the user can still paste a token by hand.
+     */
+    _tryLocalToken() {
+        if (this._mintingToken)
+            return;
+        this._mintingToken = true;
+        this._client.fetchLocalToken()
+            .then((token) => {
+                if (token && token !== this._settings.get_string('token')) {
+                    // Writing the setting triggers the 'changed' handler, which
+                    // reconnects the client with the new token.
+                    this._settings.set_string('token', token);
+                }
+            })
+            .catch((e) => logError(e, 'kiro-crew: local token fetch failed'))
+            .finally(() => {
+                this._mintingToken = false;
+            });
     }
 
     _gicon(name) {
@@ -116,7 +155,11 @@ const Indicator = class {
         menu.addMenuItem(reconnect);
 
         const settings = new PopupMenu.PopupMenuItem(_('Settings'));
-        settings.connect('activate', () => this._ext.openPreferences());
+        settings.connect('activate', () => {
+            const p = this._ext.openPreferences();
+            if (p && typeof p.catch === 'function')
+                p.catch((e) => logError(e, 'kiro-crew: openPreferences failed'));
+        });
         menu.addMenuItem(settings);
 
         this.button.menu.connect('open-state-changed', (_m, isOpen) => {
@@ -146,7 +189,7 @@ const Indicator = class {
     }
 
     _updateHeader() {
-        const label = STATE_LABEL[this._state] ?? this._state;
+        const label = stateLabel(this._state);
         const ep = this._settings.get_string('endpoint')
             .replace(/^https?:\/\//, '');
         this._header.label.text = `Kiro Crew — ${label}  (${ep})`;
@@ -176,12 +219,15 @@ const Indicator = class {
             this._sessionSection.addMenuItem(item);
             return;
         }
-        const liveByKey = new Map(this._slots.map((s) => [s.key, s]));
+        // /api/sessions keys carry a surface prefix ("dashboard_chat-8-…"),
+        // while live ws slot keys are the bare id ("chat-8-…"). Normalize both
+        // through slotName() so the status dot matches the live slot.
+        const liveByKey = new Map(this._slots.map((s) => [slotName(s.key), s]));
         for (const sess of sessions) {
             const title = sess.title || sess.key || _('(untitled)');
             const item = new PopupMenu.PopupMenuItem(title);
 
-            const live = liveByKey.get(sess.key);
+            const live = liveByKey.get(slotName(sess.key));
             const st = live ? slotState(live) : STATE.IDLE;
             const dot = new St.Icon({
                 icon_name: 'media-record-symbolic',
@@ -231,6 +277,7 @@ const Indicator = class {
             online: this._client.online,
             slots: this._slots,
             criticalNotice: this._criticalNotice,
+            authError: this._client.authError,
         });
         // A busy/idle recompute clears a stale critical flag once the gateway
         // reports healthy slots again.
@@ -253,8 +300,14 @@ const Indicator = class {
     _sessionUrl(key) {
         const base = this._settings.get_string('endpoint').replace(/\/+$/, '');
         const token = this._settings.get_string('token');
-        const q = token ? `?token=${encodeURIComponent(token)}` : '';
-        return `${base}/${q}#session=${encodeURIComponent(key ?? '')}`;
+        // The dashboard SPA opens a conversation via /chat?sid=<slot id>
+        // (it reads the "sid" query param on load). The slot id is the stored
+        // session key with its surface prefix stripped — see slotName().
+        const sid = slotName(key);
+        const parts = [`sid=${encodeURIComponent(sid)}`];
+        if (token)
+            parts.push(`token=${encodeURIComponent(token)}`);
+        return `${base}/chat?${parts.join('&')}`;
     }
 
     _openTarget() {

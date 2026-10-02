@@ -30,13 +30,73 @@ export class GatewayClient {
         this._backoff = 1;          // seconds, doubles up to _backoffMax
         this._backoffMax = 30;
         this._online = false;
+        this._authError = false;
         this._stopped = true;
         this._cb = {};
+    }
+
+    _setAuthError(v) {
+        if (v === this._authError)
+            return;
+        this._authError = v;
+        this._cb.onAuthError?.(v);
     }
 
     _base() {
         const { endpoint } = this._getConfig();
         return (endpoint || 'http://localhost:5476').replace(/\/+$/, '');
+    }
+
+    /**
+     * Read ~/.kiro/crew/.local_secret (readable only by this user's processes).
+     * Returns the trimmed secret, or '' if unavailable.
+     */
+    _readLocalSecret() {
+        try {
+            const path = GLib.build_filenamev(
+                [GLib.get_home_dir(), '.kiro', 'crew', '.local_secret']);
+            const file = Gio.File.new_for_path(path);
+            const [ok, bytes] = file.load_contents(null);
+            if (!ok)
+                return '';
+            return new TextDecoder('utf-8').decode(bytes).trim();
+        } catch {
+            return '';
+        }
+    }
+
+    /**
+     * Mint a fresh dashboard token via the gateway's loopback-only local
+     * bootstrap (GET /api/token/local with the X-Local-Secret header). This is
+     * the sanctioned path for a same-host app — not the forbidden CLI mint — and
+     * only succeeds for a process in the gateway's own namespaces (a user-session
+     * process like gnome-shell qualifies). Resolves to the token string, or ''.
+     */
+    async fetchLocalToken() {
+        const secret = this._readLocalSecret();
+        if (!secret)
+            return '';
+        const uri = `${this._base()}/api/token/local`;
+        const message = Soup.Message.new('GET', uri);
+        message.get_request_headers().append('X-Local-Secret', secret);
+        return new Promise((resolve) => {
+            this._session.send_and_read_async(
+                message, GLib.PRIORITY_DEFAULT, null,
+                (session, result) => {
+                    try {
+                        const bytes = session.send_and_read_finish(result);
+                        if (message.get_status() !== Soup.Status.OK) {
+                            resolve('');
+                            return;
+                        }
+                        const data = JSON.parse(
+                            DECODER.decode(bytes.get_data()));
+                        resolve(typeof data.token === 'string' ? data.token : '');
+                    } catch {
+                        resolve('');
+                    }
+                });
+        });
     }
 
     _withToken(url) {
@@ -81,10 +141,17 @@ export class GatewayClient {
                 try {
                     this._ws = session.websocket_connect_finish(result);
                 } catch (e) {
+                    // A 401/403 handshake means the token is bad/expired, not
+                    // that the gateway is down — surface it distinctly so the
+                    // indicator can show a muted "auth" state, not a hard error.
+                    const status = message.get_status?.() ?? 0;
+                    this._setAuthError(status === Soup.Status.UNAUTHORIZED ||
+                        status === Soup.Status.FORBIDDEN);
                     this._setOnline(false);
                     this._scheduleReconnect();
                     return;
                 }
+                this._setAuthError(false);
                 this._backoff = 1;
                 this._setOnline(true);
                 this._ws.connect('message', (_c, type, bytes) => {
@@ -159,10 +226,18 @@ export class GatewayClient {
                 (session, result) => {
                     try {
                         const bytes = session.send_and_read_finish(result);
-                        if (message.get_status() !== Soup.Status.OK) {
+                        const status = message.get_status();
+                        if (status === Soup.Status.UNAUTHORIZED ||
+                            status === Soup.Status.FORBIDDEN) {
+                            this._setAuthError(true);
                             resolve(null);
                             return;
                         }
+                        if (status !== Soup.Status.OK) {
+                            resolve(null);
+                            return;
+                        }
+                        this._setAuthError(false);
                         const text = DECODER.decode(bytes.get_data());
                         resolve(JSON.parse(text));
                     } catch {
@@ -192,6 +267,10 @@ export class GatewayClient {
 
     get online() {
         return this._online;
+    }
+
+    get authError() {
+        return this._authError;
     }
 
     destroy() {
