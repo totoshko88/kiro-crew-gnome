@@ -4,7 +4,7 @@
 
 # Kiro Crew — command your crew from the GNOME top bar 👻
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--50-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--50-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml) [![Get it on GNOME Extensions](https://img.shields.io/badge/GNOME%20Extensions-Install-4A86CF?logo=gnome)](https://extensions.gnome.org/extension/11123/kiro-crew/)
 
 **Your AI crew is working right now — do you know what it's doing?**
 
@@ -80,6 +80,16 @@ Letting an AI agent run shell commands, edit files, and hit the network sounds s
 So the pitch is simple: **powerful autonomous agents, kept on a short leash, on a machine you own — and a ghost in your top bar watching the leash for you.**
 
 ## Install the extension
+
+### From GNOME Extensions (recommended)
+
+The easiest way — one click on the extension page:
+
+**[→ Install from extensions.gnome.org](https://extensions.gnome.org/extension/11123/kiro-crew/)**
+
+Then make sure a Kiro Crew gateway is running (`kirocrew gateway`) and you're done.
+
+### From source
 
 ```sh
 git clone https://github.com/totoshko88/kiro-crew-gnome

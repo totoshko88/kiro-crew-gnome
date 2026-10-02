@@ -35,6 +35,16 @@ If both are true, you're ready.
 
 ## 2. Install the extension
 
+### Option A — from GNOME Extensions (easiest)
+
+Open the extension page and toggle it on:
+
+**[→ extensions.gnome.org/extension/11123/kiro-crew](https://extensions.gnome.org/extension/11123/kiro-crew/)**
+
+That's the whole install. Skip to step 3.
+
+### Option B — from source
+
 ```bash
 git clone https://github.com/totoshko88/kiro-crew-gnome
 cd kiro-crew-gnome
