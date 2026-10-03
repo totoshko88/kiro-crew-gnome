@@ -7,6 +7,10 @@
  *   onSlots(slotsArray)            latest "slots" frame data
  *   onNotification(noticeObject)   a "notification" frame
  *   onOnline(bool)                 reachability changed
+ *   onAuthError(bool)              token accepted / rejected changed
+ *
+ * The only non-GET call is shutdownLocal(), the opt-in "Stop gateway" path
+ * for a gateway that runs without a service manager.
  */
 
 import Soup from 'gi://Soup';
@@ -35,6 +39,9 @@ export class GatewayClient {
         this._online = false;
         this._authError = false;
         this._stopped = true;
+        // Paused = the gateway was stopped on purpose: hold the socket closed
+        // and don't spin reconnect attempts against a port nobody listens on.
+        this._paused = false;
         this._cb = {};
     }
 
@@ -105,6 +112,35 @@ export class GatewayClient {
         });
     }
 
+    /**
+     * Ask a gateway that is NOT under a service manager (started by hand with
+     * `kirocrew gateway`) to shut down: POST /api/shutdown with the local
+     * secret — the gateway's own loopback-only, same-user path, the same
+     * trigger as SIGTERM. Never used for a systemd-managed gateway (that is
+     * stopped through systemd, which also suppresses Restart=always).
+     * Resolves to true when the gateway accepted the request.
+     */
+    async shutdownLocal() {
+        const secret = await this._readLocalSecret();
+        if (!secret || !this._session)
+            return false;
+        const message = Soup.Message.new('POST', `${this._base()}/api/shutdown`);
+        message.get_request_headers().append('X-Local-Secret', secret);
+        return new Promise(resolve => {
+            this._session.send_and_read_async(
+                message, GLib.PRIORITY_DEFAULT, null,
+                (session, result) => {
+                    try {
+                        session.send_and_read_finish(result);
+                        const status = message.get_status();
+                        resolve(status >= 200 && status < 300);
+                    } catch {
+                        resolve(false);
+                    }
+                });
+        });
+    }
+
     _withToken(url) {
         const {token} = this._getConfig();
         if (!token)
@@ -138,7 +174,7 @@ export class GatewayClient {
     }
 
     _openWebsocket() {
-        if (this._stopped || !this._session)
+        if (this._stopped || this._paused || !this._session)
             return;
         this._closeWebsocket();
         const message = Soup.Message.new('GET', this._wsUri());
@@ -171,7 +207,7 @@ export class GatewayClient {
                     return;
                 }
                 // Completed, but a newer attempt or destroy() raced us.
-                if (cancellable !== this._wsCancellable || this._stopped) {
+                if (cancellable !== this._wsCancellable || this._stopped || this._paused) {
                     try {
                         ws.close(Soup.WebsocketCloseCode.NORMAL, null);
                     } catch { /* already gone */ }
@@ -231,7 +267,7 @@ export class GatewayClient {
     }
 
     _scheduleReconnect() {
-        if (this._stopped || this._reconnectId)
+        if (this._stopped || this._paused || this._reconnectId)
             return;
         const delay = this._backoff;
         this._backoff = Math.min(this._backoff * 2, this._backoffMax);
@@ -301,13 +337,39 @@ export class GatewayClient {
         return this.getJson(`/api/sessions${q}`);
     }
 
-    reconnectNow() {
-        this._backoff = 1;
+    _cancelReconnect() {
         if (this._reconnectId) {
             GLib.source_remove(this._reconnectId);
             this._reconnectId = 0;
         }
+    }
+
+    reconnectNow() {
+        this._backoff = 1;
+        this._cancelReconnect();
         this._openWebsocket();
+    }
+
+    /** Hold the connection closed (gateway stopped on purpose). Idempotent. */
+    pause() {
+        if (this._paused)
+            return;
+        this._paused = true;
+        this._cancelReconnect();
+        this._closeWebsocket();
+        this._setOnline(false);
+    }
+
+    /** Leave the paused state and reconnect right away. Idempotent. */
+    resume() {
+        if (!this._paused)
+            return;
+        this._paused = false;
+        this.reconnectNow();
+    }
+
+    get paused() {
+        return this._paused;
     }
 
     get online() {
@@ -323,10 +385,7 @@ export class GatewayClient {
         // Drop callbacks first: anything that completes during teardown
         // (cancelled reads, aborted requests) must not reach the indicator.
         this._cb = {};
-        if (this._reconnectId) {
-            GLib.source_remove(this._reconnectId);
-            this._reconnectId = 0;
-        }
+        this._cancelReconnect();
         this._ioCancellable?.cancel();
         this._ioCancellable = null;
         this._closeWebsocket();

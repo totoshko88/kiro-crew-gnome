@@ -1,6 +1,6 @@
 {
   "name": "kiro-crew-gnome",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "GNOME Shell extension: top-bar indicator for the local Kiro Crew gateway",
   "type": "module",
   "scripts": {

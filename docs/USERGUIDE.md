@@ -101,19 +101,32 @@ The icon color is the single most important thing. It's the *worst* thing happen
 | Color | State | What it means | What to do |
 |-------|-------|---------------|------------|
 | ⚪ grey | idle | Gateway is up, nothing is running | Nothing |
-| 🔵 blue | busy | At least one agent is working | Wait, or peek |
-| 🟡 amber | attention | An agent asked a question or wants an approval | Click — it needs you |
+| 🟣 purple | busy | At least one agent is working | Wait, or peek |
+| 🟡 amber | attention | An agent is blocked on you: it asked a question or wants a tool approval (reply suggestions after a finished turn don't count) | Click — it needs you |
 | 🔴 red | problem | A critical alert, an MCP error, or the gateway is unreachable | Click / investigate |
 | 🔴 dim red | auth | Your token expired | Reopen the dashboard, refetch a token |
+| 💤 faded, eyes closed | stopped | You stopped the gateway (or it is stopping / starting) | Menu → **Start gateway** when you need it |
 
-Priority order (highest wins): **auth → problem → attention → busy → idle.**
+Priority order (highest wins): **stopped → auth → problem → attention → busy → idle.**
+
+"Working" counts every way a session can be busy, the same way the dashboard
+sidebar does: the agent's own turn, a staged plan, background subagents, or
+queued prompts. So a session that handed work to subagents stays purple even
+while its main agent waits for them.
+
+The ghost also moves a little when its state changes: it floats when work
+starts, hops when an agent needs you, gives a small hop when work finishes,
+and shakes its head when something breaks. Each motion plays once. Turn
+animations off in GNOME Settings → Accessibility and the ghost stays still.
 
 ### Clicking
 
 - **Left-click the ghost** → jumps straight to the **most relevant session**:
   the one with a problem, else the one needing attention, else the one that's
-  active. If everything is idle, it opens the dashboard home instead.
-- **Right-click (or just click) → menu** (details below).
+  active (the most recently active one if several match). If everything is
+  idle, it opens the dashboard home instead. While the gateway is stopped,
+  left-click opens the menu, since there is nothing to open in the browser.
+- **Right-click → menu** (details below).
 
 ---
 
@@ -123,11 +136,27 @@ Right-click (secondary button) opens the menu:
 
 - **Recent sessions** (up to 10) — each with a title and a **status dot** in the
   same color scheme as the main icon, reflecting that session's live state.
-  Click any one to open it in the browser.
+  Click any one to open it in the browser. The dots follow the same rule as
+  the ghost, so the ghost's color is always the worst dot you see. An active
+  session that isn't among the recent ones is pinned to the top.
+- **Open dashboard** — the dashboard home.
+- **Gateway logs** — the dashboard's live log viewer.
 - **Endpoint** — switch between the gateway URLs you saved in Settings (handy if
   you run more than one gateway, e.g. a local one and a container).
-- **Reconnect** — force the live connection to reconnect now (useful right after
-  you start the gateway, or after a network blip).
+- **Stop gateway / Start gateway** — shown for a gateway on this machine
+  (`localhost` endpoint):
+  - Installed as a service (`kirocrew service install`): stops and starts
+    `kirocrew.service` through systemd. For the system service GNOME asks for
+    your password (polkit); it remembers it for a few minutes. A stopped
+    service stays stopped until you start it or the machine reboots — the
+    service stays enabled.
+  - Started by hand (`kirocrew gateway`): **Stop** asks the gateway to shut
+    down cleanly. There is no Start for this case — run `kirocrew gateway`
+    again; the ghost notices on its own.
+  - If sessions are still working, you are asked to confirm first, because
+    stopping interrupts them.
+- **Reconnect** — force the live connection to reconnect now (useful after a
+  network blip). Hidden while the gateway is stopped.
 - **Settings** — opens the preferences window.
 
 ---
@@ -183,6 +212,13 @@ gnome-extensions info kiro-crew@totoshko88.github.io
 
 **Ghost is bright red but the gateway is fine.** That's a *crew* signal: a critical notification or an agent error. Click the ghost to jump to it, or open the dashboard.
 
+**"Stop gateway" asks for a password.** That's polkit guarding the system
+service: stopping a system unit is an admin action. Cancel and nothing
+changes. To avoid the prompt, run the gateway as a user service or by hand.
+
+**Stop/Start is missing from the menu.** It only appears for a `localhost`
+endpoint, and for a hand-run gateway only while it is reachable.
+
 **Session dots are all grey even though agents are running.** Make sure the gateway is reachable and the token is valid (dim red = token). If the live connection is down, the menu falls back to polling and dots can lag; use **Reconnect**.
 
 **Reading the logs.**
@@ -208,4 +244,4 @@ Then reload the shell (log out / in on Wayland).
 
 ## 10. Privacy note
 
-This extension talks **only** to your local gateway over loopback. It reads state (sessions, slots, status, notifications) and opens URLs in your browser. It never sends your data anywhere else, never calls a mutating gateway endpoint, and never mints a credential by the security-gated path — it only uses the sanctioned local bootstrap that already trusts same-machine processes.
+This extension talks **only** to your local gateway over loopback. It reads state (sessions, slots, status, notifications) and opens URLs in your browser. The only thing it ever changes is the gateway's running state, and only when you choose **Stop gateway** / **Start gateway** in the menu. It never sends your data anywhere else, never calls any other mutating gateway endpoint, and never mints a credential by the security-gated path — it only uses the sanctioned local bootstrap that already trusts same-machine processes.

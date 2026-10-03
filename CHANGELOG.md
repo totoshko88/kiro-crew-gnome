@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2]
+
+### Fixed
+
+- With several sessions open, the ghost and the menu dots tracked only the session whose main agent was mid-turn. A session counts as working the same way the dashboard sidebar counts it: its own turn, a staged plan, background subagents, or queued prompts. Amber means only that an agent is blocked on you (a question or a tool approval). The quick-reply suggestions an agent leaves after a finished turn don't count.
+- The ghost and the menu dots use one rule, so the ghost's color is always the worst dot in the menu. An active session outside the recent list is pinned to the top of the menu, so the reason for the color is always visible.
+- Untitled sessions in the menu show their live title (for example "New Session…") instead of the raw storage key.
+- Left-click now jumps to the most recently active matching session. The gateway sends ISO timestamps, which the old numeric sort could not compare, so the pick was effectively arbitrary.
+
+### Added
+
+- **Stop gateway / Start gateway** in the menu, for a gateway on this machine. A service install (`kirocrew.service`, system or user unit) is controlled through systemd's D-Bus API, with GNOME's polkit password prompt for a system unit. A hand-run `kirocrew gateway` is stopped through its loopback-only `POST /api/shutdown`. If sessions are still working, you're asked to confirm first.
+- New **stopped** state: a faded ghost with closed eyes, so a gateway you turned off on purpose no longer looks like a red outage. While it's stopped the extension stops reconnecting, hides Reconnect, and left-click opens the menu. It notices when the gateway is started outside the menu.
+- **Gateway logs** menu item, which opens the dashboard's live log viewer.
+- Short one-shot icon motion on state changes, modelled on the dashboard companion's moves: float when work starts, hop when an agent needs you, a small hop when work finishes, and a head shake on a problem. It respects GNOME's animation setting and never loops.
+
+### Changed
+
+- The "working" color is now Kiro purple (`#8e48ff`, the dashboard's accent) instead of blue, for the ghost and the menu dots.
+
+### Security
+
+- The extension can now change one thing: the gateway's running state, and only on an explicit menu action for a loopback endpoint. See [SECURITY.md](docs/SECURITY.md).
+
 ## [0.1.1]
 
 Hotfix addressing the EGO review warnings plus lifecycle bugs found along the way.

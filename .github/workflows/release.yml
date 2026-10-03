@@ -105,7 +105,12 @@ jobs:
                 ['git', 'tag', '--list', 'v*'],
                 capture_output=True, text=True, check=True
             ).stdout.split()
+            # Skip the tag being released: its own metadata.json is "current",
+            # not a previous release (counting it always forced a +1 bump).
+            this_tag = os.environ.get('GITHUB_REF_NAME', '')
             for t in tags:
+                if t == this_tag:
+                    continue
                 try:
                     blob = subprocess.run(
                         ['git', 'show', f'{t}:{path}'],
