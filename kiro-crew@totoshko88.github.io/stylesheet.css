@@ -10,7 +10,7 @@
 }
 
 .kiro-crew-busy {
-    color: #3b82f6; /* blue — matches the gateway "working" board color */
+    color: #8e48ff; /* Kiro purple — the dashboard's --accent (dark + light) */
 }
 
 .kiro-crew-attention {
@@ -21,6 +21,11 @@
     color: #ef4444; /* red */
 }
 
+.kiro-crew-stopped {
+    /* Gateway stopped on purpose: a neutral, faded ghost (the indicator also
+     * lowers the actor opacity) so it reads as "off", never as an alarm. */
+    color: inherit;
+}
 .kiro-crew-auth {
     /* Dim red: a bad/expired token is a nudge, not an alarm — must not read
      * like the bright #ef4444 error state. */
@@ -37,7 +42,7 @@
 }
 
 .kiro-crew-dot.kiro-crew-busy {
-    color: #3b82f6;
+    color: #8e48ff;
 }
 
 .kiro-crew-dot.kiro-crew-attention {
@@ -46,6 +51,14 @@
 
 .kiro-crew-dot.kiro-crew-error {
     color: #ef4444;
+}
+.kiro-crew-dot.kiro-crew-stopped {
+    color: rgba(255, 255, 255, 0.15);
+}
+/* One-line hints in the menu (e.g. how to start a hand-run gateway). */
+.kiro-crew-hint {
+    font-size: smaller;
+    color: rgba(255, 255, 255, 0.55);
 }
 
 .kiro-crew-header {

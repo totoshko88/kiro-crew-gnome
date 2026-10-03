@@ -4,17 +4,18 @@
 
 # Kiro Crew — command your crew from the GNOME top bar 👻
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--50-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.1-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml) [![Get it on GNOME Extensions](https://img.shields.io/badge/GNOME%20Extensions-Install-4A86CF?logo=gnome)](https://extensions.gnome.org/extension/11123/kiro-crew/)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--50-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.2-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml) [![Get it on GNOME Extensions](https://img.shields.io/badge/GNOME%20Extensions-Install-4A86CF?logo=gnome)](https://extensions.gnome.org/extension/11123/kiro-crew/)
 
 **Your AI crew is working right now — do you know what it's doing?**
 
 This extension puts a little ghost in your GNOME top bar that watches your whole [Kiro Crew](https://github.com/kirodotdev/kirocrew) and tells you, at a glance, without opening a single browser tab:
 
-- 🔵 **blue** — an agent is working
+- 🟣 **purple** — an agent is working (Kiro's own accent color)
 - 🟡 **amber** — an agent stopped and needs *you* (a question or an approval)
 - 🔴 **red** — something broke, or the gateway is down
 - 🔴 **dim red** — your access token expired (just refetch one)
 - ⚪ **grey** — all quiet
+- 💤 **faded, eyes closed** — you stopped the gateway on purpose (start it again from the menu)
 
 **One click takes you straight to the session that wants you** — not the home page, not the last tab you had open, *the* one that needs attention. It is the difference between babysitting a dashboard and running a crew.
 
@@ -109,13 +110,21 @@ That's it. On a normal local setup the extension **fetches its own access token*
 ## How it reads your crew
 
 - **Live state** — a WebSocket to `GET /api/ws`, frame `type:"slots"`. Each
-  slot's `running` / `pending_approval` / `needs_input` / `mcp_report` is reduced
-  to one indicator state (`lib/state.js`).
+  slot is reduced to one state with the dashboard sidebar's rules (working =
+  own turn, staged plan, background subagents or queued prompts; waiting =
+  a question or a tool approval; plus `mcp_report` errors), then all slots are
+  folded into one indicator state (`lib/state.js`).
+- **Gateway Stop / Start** — the only actions that change anything, and only
+  when you pick them in the menu. A gateway installed with
+  `kirocrew service install` is driven through systemd's D-Bus API
+  (`kirocrew.service`, system or user unit; GNOME asks for your password via
+  polkit for a system unit). A hand-run `kirocrew gateway` is stopped through
+  its loopback-only, local-secret-gated `POST /api/shutdown`.
 - **Recent sessions** — `GET /api/sessions?limit=N&preview=1`.
 - **Token** — fetched automatically from the gateway's loopback-only
   `GET /api/token/local` bootstrap, which only works for a process on your own
   machine in the gateway's namespaces. The extension never mints a credential
-  the forbidden way, and never calls a mutating endpoint.
+  the forbidden way, and calls no mutating endpoint except the Stop you ask for.
 - **Health / fallback** — `GET /api/status`, polled only while the WebSocket is
   down.
 
@@ -142,9 +151,11 @@ kiro-crew@totoshko88.github.io/
   extension.js   indicator, menu, lifecycle, auto-token
   prefs.js       Adwaita preferences (endpoint, token, Fetch / Open buttons)
   lib/client.js  Soup HTTP + WebSocket client (auth, reconnect, local bootstrap)
+  lib/service.js kirocrew.service Stop/Start/state over systemd D-Bus
+  lib/animator.js one-shot icon motion on state changes
   lib/state.js   slot list → aggregate icon state (pure, testable)
   schemas/       GSettings schema
-  icons/         four symbolic states (idle / busy / attention / error)
+  icons/         five symbolic states (idle / busy / attention / error / stopped)
   stylesheet.css status tints
 ```
 

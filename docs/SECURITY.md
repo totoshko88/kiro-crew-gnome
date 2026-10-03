@@ -11,8 +11,18 @@
 
 This extension implements several security measures:
 
-- **Read-only**: The extension only reads gateway state (status, sessions, live
-  slot updates). It never calls a mutating endpoint.
+- **Read-only by default**: The extension reads gateway state (status,
+  sessions, live slot updates). The one exception is the gateway's lifecycle,
+  and only on an explicit menu action:
+  - **Stop / Start gateway** for a service install drives `kirocrew.service`
+    through systemd's D-Bus API (`StopUnit` / `StartUnit`). For a system unit
+    systemd checks polkit (`org.freedesktop.systemd1.manage-units`), so GNOME
+    asks for an administrator password; the extension holds no privilege of
+    its own and runs no subprocess or `sudo`.
+  - **Stop gateway** for a hand-run gateway calls `POST /api/shutdown`, which
+    the gateway accepts only from loopback with the per-user local secret.
+  - Both are offered only for a loopback endpoint, never for a remote gateway.
+  It calls no other mutating endpoint.
 - **Never mints credentials**: Token creation is a security-gated surface on the
   gateway; the extension cannot and does not create tokens. You paste an existing
   token into Settings.
@@ -44,7 +54,8 @@ You can expect:
 Security issues in scope:
 - Credential (token) exposure or logging
 - Leakage of gateway session data
-- Any path that could cause the extension to call a mutating endpoint
+- Any path that could cause the extension to call a mutating endpoint, or to
+  stop/start the gateway, without an explicit user action
 
 Out of scope:
 - Kiro Crew gateway vulnerabilities (report to the gateway project)

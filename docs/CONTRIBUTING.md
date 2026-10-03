@@ -31,6 +31,8 @@ make test-logic
 |------|---------|
 | `kiro-crew@totoshko88.github.io/extension.js` | Lifecycle, top-bar indicator, and menu |
 | `kiro-crew@totoshko88.github.io/lib/client.js` | Soup HTTP + WebSocket client (auth, reconnect) |
+| `kiro-crew@totoshko88.github.io/lib/service.js` | `kirocrew.service` state and Stop/Start over systemd D-Bus |
+| `kiro-crew@totoshko88.github.io/lib/animator.js` | One-shot icon motion on state changes |
 | `kiro-crew@totoshko88.github.io/lib/state.js` | Pure reducer: slot list → aggregate indicator state |
 | `kiro-crew@totoshko88.github.io/prefs.js` | Adwaita preferences (gateway URL, token) |
 
@@ -40,8 +42,12 @@ make test-logic
 - Clean up every resource in `disable()` (sources, signals, the WebSocket)
 - No GTK/Adw imports in `extension.js` (it runs in the Shell process)
 - Follow the [EGO Review Guidelines](https://gjs.guide/extensions/review-guidelines/review-guidelines.html)
-- Never mint credentials and never call a mutating gateway endpoint — the
-  extension is read-only against the local Kiro Crew gateway
+- Never mint credentials. The extension is read-only against the gateway; the
+  only exception is the user-initiated Stop/Start of a loopback gateway
+  (systemd D-Bus, or `POST /api/shutdown` for a hand-run gateway)
+- No subprocesses or `sudo`; privileged actions go through polkit
+- Animations must be finite (no continuous panel repaint) and respect
+  `enable-animations`
 
 ## Pull Request Process
 

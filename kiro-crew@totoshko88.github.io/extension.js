@@ -5,21 +5,27 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 
-import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {Extension, gettext as _, ngettext} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
+import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
+import * as Dialog from 'resource:///org/gnome/shell/ui/dialog.js';
 
 import {GatewayClient} from './lib/client.js';
+import {GatewayService, isAuthDenied} from './lib/service.js';
+import {IconAnimator} from './lib/animator.js';
 import {
-    STATE, ICON_NAME, STYLE_CLASS, aggregateState, slotState, targetSlotKey, slotName
+    STATE, ICON_NAME, STYLE_CLASS, aggregateState, targetSlotKey,
+    slotName, activeSessionCount, isLoopbackEndpoint, menuRows
 } from './lib/state.js';
 
 // gettext() may only be called from within the extension lifecycle, never at
 // module-evaluation time. Resolve labels lazily so _() runs at render time.
 function stateLabel(state) {
     switch (state) {
+        case 'stopped': return _('Gateway stopped');
         case 'offline': return _('Gateway offline');
         case 'auth': return _('Token expired — update in Settings');
         case 'error': return _('Problem — attention needed');
@@ -42,6 +48,13 @@ const DOT_CLASS = {
     offline: 'kiro-crew-dot kiro-crew-error'
 };
 
+// Opacity of the panel icon while the gateway is stopped (0-255).
+const STOPPED_OPACITY = 115;
+// Fast re-check cadence while a Stop/Start settles, and how long to wait.
+const WATCH_INTERVAL_S = 1;
+const STOP_WATCH_S = 30;
+const START_WATCH_S = 60;
+
 const Indicator = class {
     constructor(extension) {
         this._ext = extension;
@@ -50,9 +63,19 @@ const Indicator = class {
         this._state = STATE.OFFLINE;
         this._criticalNotice = false;
         this._pollId = 0;
+        this._watchId = 0;
         this._notifSource = null;
         this._notifSourceDestroyId = 0;
         this._mintingToken = false;
+        // Gateway lifecycle. _svcActive is the systemd ActiveState of
+        // kirocrew.service (null = unknown / not installed / remote endpoint).
+        // _pendingOp is a Stop/Start the user asked for that hasn't settled.
+        // _manualStopped marks a hand-run gateway we shut down via the API.
+        this._svcActive = null;
+        this._pendingOp = null;
+        this._manualStopped = false;
+        this._dialog = null;
+        this._dialogDestroyId = 0;
         // Set in destroy(); async continuations check it so nothing touches
         // destroyed actors or nulled settings after disable().
         this._destroyed = false;
@@ -65,6 +88,7 @@ const Indicator = class {
             style_class: STYLE_CLASS.offline
         });
         this.button.add_child(this._icon);
+        this._animator = new IconAnimator(this._icon);
 
         // Left-click opens the relevant target directly, without the menu
         // flashing. We intercept the press and route it ourselves.
@@ -76,12 +100,14 @@ const Indicator = class {
             return Clutter.EVENT_PROPAGATE;  // secondary → menu
         });
 
-        this._buildMenu();
-
+        this._service = new GatewayService();
         this._client = new GatewayClient(() => ({
             endpoint: this._settings.get_string('endpoint'),
             token: this._settings.get_string('token')
         }));
+
+        this._buildMenu();
+
         this._client.start({
             onSlots: slots => this._onSlots(slots),
             onNotification: n => this._onNotification(n),
@@ -94,8 +120,20 @@ const Indicator = class {
         });
 
         this._settingsChangedId = this._settings.connect('changed', (_s, key) => {
-            if (key === 'endpoint' || key === 'token')
+            if (key === 'endpoint') {
+                // A different gateway: forget the old one's lifecycle state.
+                this._cancelWatch();
+                this._pendingOp = null;
+                this._manualStopped = false;
+                this._svcActive = null;
+                if (this._client.paused)
+                    this._client.resume();
+                else
+                    this._client.reconnectNow();
+                this._refreshService();
+            } else if (key === 'token') {
                 this._client.reconnectNow();
+            }
             if (key === 'max-sessions' || key === 'show-previews')
                 this._refreshSessions();
             if (key === 'poll-interval')
@@ -104,6 +142,7 @@ const Indicator = class {
 
         this._startPoll();
         this._refreshSessions();
+        this._refreshService();
 
         // If no token is configured yet, try the local bootstrap once so a
         // fresh install lights up without a manual paste.
@@ -161,17 +200,35 @@ const Indicator = class {
         menu.addMenuItem(this._sessionSection);
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        const open = new PopupMenu.PopupMenuItem(_('Open dashboard'));
-        open.connect('activate', () => this._openUrl(this._dashboardUrl()));
-        menu.addMenuItem(open);
+        this._openItem = new PopupMenu.PopupMenuItem(_('Open dashboard'));
+        this._openItem.connect('activate', () => this._openUrl(this._pageUrl('/')));
+        menu.addMenuItem(this._openItem);
+
+        this._logsItem = new PopupMenu.PopupMenuItem(_('Gateway logs'));
+        this._logsItem.connect('activate', () => this._openUrl(this._pageUrl('/logs')));
+        menu.addMenuItem(this._logsItem);
 
         this._endpointSub = new PopupMenu.PopupSubMenuMenuItem(_('Endpoint'));
         menu.addMenuItem(this._endpointSub);
         this._rebuildEndpointSubmenu();
 
-        const reconnect = new PopupMenu.PopupMenuItem(_('Reconnect'));
-        reconnect.connect('activate', () => this._client.reconnectNow());
-        menu.addMenuItem(reconnect);
+        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // Stop/Start the local gateway. Label, action and visibility follow
+        // the service state — see _updateControls().
+        this._gatewayAction = null;
+        this._gatewayItem = new PopupMenu.PopupMenuItem('');
+        this._gatewayItem.connect('activate', () => {
+            if (this._gatewayAction === 'stop')
+                this._confirmStop();
+            else if (this._gatewayAction === 'start')
+                this._startGateway();
+        });
+        menu.addMenuItem(this._gatewayItem);
+
+        this._reconnectItem = new PopupMenu.PopupMenuItem(_('Reconnect'));
+        this._reconnectItem.connect('activate', () => this._client.reconnectNow());
+        menu.addMenuItem(this._reconnectItem);
 
         const settings = new PopupMenu.PopupMenuItem(_('Settings'));
         settings.connect('activate', () => {
@@ -182,11 +239,14 @@ const Indicator = class {
         menu.addMenuItem(settings);
 
         this._menuOpenStateId = this.button.menu.connect('open-state-changed', (_m, isOpen) => {
-            if (isOpen)
+            if (isOpen) {
                 this._refreshSessions();
+                this._refreshService();
+            }
         });
 
         this._updateHeader();
+        this._updateControls();
     }
 
     _rebuildEndpointSubmenu() {
@@ -207,14 +267,76 @@ const Indicator = class {
         }
     }
 
+    _headerLabel() {
+        if (this._state === STATE.STOPPED) {
+            if (this._pendingOp === 'start' || this._svcActive === 'activating')
+                return _('Starting gateway…');
+            if (this._pendingOp === 'stop' || this._svcActive === 'deactivating')
+                return _('Stopping gateway…');
+        }
+        return stateLabel(this._state);
+    }
+
     _updateHeader() {
-        const label = stateLabel(this._state);
         const ep = this._settings.get_string('endpoint')
             .replace(/^https?:\/\//, '');
-        this._header.label.text = `Kiro Crew — ${label}  (${ep})`;
+        this._header.label.text = `Kiro Crew — ${this._headerLabel()}  (${ep})`;
+    }
+
+    /** Sync the Stop/Start item and the items that need a live gateway. */
+    _updateControls() {
+        if (!this._gatewayItem)
+            return;
+        const stopped = this._state === STATE.STOPPED;
+        this._openItem.setSensitive(!stopped);
+        this._logsItem.setSensitive(!stopped);
+        this._reconnectItem.visible = !stopped;
+
+        let label = null;
+        let action = null;
+        const mode = this._controlMode();
+        if (this._pendingOp === 'stop') {
+            label = _('Stopping gateway…');
+        } else if (this._pendingOp === 'start') {
+            label = _('Starting gateway…');
+        } else if (mode === 'service') {
+            switch (this._svcActive) {
+                case 'inactive':
+                case 'failed':
+                    label = _('Start gateway');
+                    action = 'start';
+                    break;
+                case 'deactivating':
+                    label = _('Stopping gateway…');
+                    break;
+                case 'active':
+                case 'activating':
+                case 'reloading':
+                    // Stop also works mid auto-restart: it breaks a crash loop.
+                    label = _('Stop gateway');
+                    action = 'stop';
+                    break;
+                default:
+                    break;  // unknown → hidden
+            }
+        } else if (mode === 'api' && this._client.online) {
+            // Hand-run gateway: stop via its local API.
+            label = _('Stop gateway');
+            action = 'stop';
+        }
+        this._gatewayAction = action;
+        this._gatewayItem.visible = label !== null;
+        if (label !== null) {
+            this._gatewayItem.label.text = label;
+            this._gatewayItem.setSensitive(action !== null);
+        }
     }
 
     _refreshSessions() {
+        if (this._state === STATE.STOPPED) {
+            this._renderSessions([], false);
+            return;
+        }
         const max = this._settings.get_int('max-sessions');
         const wantPreview = this._settings.get_boolean('show-previews');
         this._client.fetchSessions(max, wantPreview).then(data => {
@@ -224,46 +346,49 @@ const Indicator = class {
         });
     }
 
+    _addInfoItem(text, styleClass = null) {
+        const item = new PopupMenu.PopupMenuItem(text, {reactive: false});
+        if (styleClass)
+            item.label.add_style_class_name(styleClass);
+        this._sessionSection.addMenuItem(item);
+    }
+
     _renderSessions(sessions, wantPreview) {
         this._sessionSection.removeAll();
+        if (this._state === STATE.STOPPED) {
+            this._addInfoItem(this._headerLabel());
+            if (this._controlMode() !== 'service' && !this._pendingOp) {
+                // Nothing we can start: tell the user how.
+                this._addInfoItem(_('Run “kirocrew gateway” to start it again'),
+                    'kiro-crew-hint');
+            }
+            return;
+        }
         if (!this._client.online) {
-            const item = new PopupMenu.PopupMenuItem(_('Gateway offline'), {
-                reactive: false
-            });
-            this._sessionSection.addMenuItem(item);
+            this._addInfoItem(_('Gateway offline'));
             return;
         }
-        if (sessions.length === 0) {
-            const item = new PopupMenu.PopupMenuItem(_('No recent sessions'), {
-                reactive: false
-            });
-            this._sessionSection.addMenuItem(item);
+        // Same per-slot rule as the ghost (slotState), and any active slot
+        // outside the recent list is pinned on top, so the ghost's color is
+        // always the worst dot shown here. Keys are normalized via slotName().
+        const rows = menuRows(sessions, this._slots);
+        if (rows.length === 0) {
+            this._addInfoItem(_('No recent sessions'));
             return;
         }
-        // /api/sessions keys carry a surface prefix ("dashboard_chat-8-…"),
-        // while live ws slot keys are the bare id ("chat-8-…"). Normalize both
-        // through slotName() so the status dot matches the live slot.
-        const liveByKey = new Map(this._slots.map(s => [slotName(s.key), s]));
-        for (const sess of sessions) {
-            const title = sess.title || sess.key || _('(untitled)');
-            const item = new PopupMenu.PopupMenuItem(title);
-
-            const live = liveByKey.get(slotName(sess.key));
-            const st = live ? slotState(live) : STATE.IDLE;
+        for (const row of rows) {
+            const item = new PopupMenu.PopupMenuItem(row.title || _('(untitled)'));
             const dot = new St.Icon({
                 icon_name: 'media-record-symbolic',
-                style_class: DOT_CLASS[st] ?? DOT_CLASS.idle,
+                style_class: DOT_CLASS[row.state] ?? DOT_CLASS.idle,
                 icon_size: 10,
                 x_align: Clutter.ActorAlign.END,
                 x_expand: true
             });
             item.add_child(dot);
-
-            if (wantPreview && sess.preview) {
+            if (wantPreview)
                 item.label.clutter_text.set_line_wrap(false);
-                item.label.text = `${title}`;
-            }
-            item.connect('activate', () => this._openUrl(this._sessionUrl(sess.key)));
+            item.connect('activate', () => this._openUrl(this._sessionUrl(row.key)));
             this._sessionSection.addMenuItem(item);
         }
     }
@@ -278,10 +403,19 @@ const Indicator = class {
     }
 
     _onOnline(ok) {
+        if (ok) {
+            // The gateway is back: whatever was stopped is running again.
+            this._manualStopped = false;
+            if (this._pendingOp === 'start')
+                this._finishOp();
+        } else {
+            this._slots = [];
+        }
         this._recompute();
         this._renderSessions([], this._settings.get_boolean('show-previews'));
         if (ok)
             this._refreshSessions();
+        this._refreshService();
     }
 
     _onNotification(n) {
@@ -293,12 +427,48 @@ const Indicator = class {
         }
     }
 
+    _isLocal() {
+        return isLoopbackEndpoint(this._settings.get_string('endpoint'));
+    }
+
+    /**
+     * How the local gateway is controlled:
+     *   'service' — through systemd (kirocrew.service is installed and is
+     *               what runs, or would run, the gateway);
+     *   'api'     — a hand-run `kirocrew gateway` (no unit, or the unit is
+     *               down while a gateway still answers): POST /api/shutdown;
+     *   null      — remote endpoint, or nothing known to control.
+     */
+    _controlMode() {
+        if (!this._isLocal())
+            return null;
+        const unitDown = this._svcActive === 'inactive' || this._svcActive === 'failed';
+        if (this._service.scope && !(unitDown && this._client.online))
+            return 'service';
+        if (this._client.online || this._manualStopped)
+            return 'api';
+        return null;
+    }
+
+    /** Was the gateway stopped on purpose (or is a Stop/Start settling)? */
+    _isStopped() {
+        if (!this._isLocal())
+            return false;
+        if (this._pendingOp)
+            return true;
+        if (this._controlMode() === 'service')
+            return this._svcActive === 'inactive' || this._svcActive === 'deactivating';
+        return this._manualStopped && !this._client.online;
+    }
+
     _recompute() {
+        const prev = this._state;
         const next = aggregateState({
             online: this._client.online,
             slots: this._slots,
             criticalNotice: this._criticalNotice,
-            authError: this._client.authError
+            authError: this._client.authError,
+            stopped: this._isStopped()
         });
         // A busy/idle recompute clears a stale critical flag once the gateway
         // reports healthy slots again.
@@ -307,15 +477,199 @@ const Indicator = class {
         this._state = next;
         this._icon.gicon = this._gicon(ICON_NAME[next]);
         this._icon.style_class = STYLE_CLASS[next];
+        this._icon.opacity = next === STATE.STOPPED ? STOPPED_OPACITY : 255;
+        if (prev !== next)
+            this._animator.transition(prev, next);
         this._updateHeader();
+        this._updateControls();
+        if (prev !== next && (prev === STATE.STOPPED || next === STATE.STOPPED) &&
+            this.button.menu.isOpen)
+            this._refreshSessions();
+    }
+
+    // ---- gateway lifecycle -------------------------------------------------
+
+    /**
+     * Re-read the service's ActiveState and hold the live connection closed
+     * while it is down on purpose (no reconnect spin against a dead port).
+     */
+    async _refreshService() {
+        if (this._destroyed)
+            return;
+        if (!this._isLocal()) {
+            this._svcActive = null;
+            this._recompute();
+            return;
+        }
+        let active = null;
+        try {
+            active = await this._service.activeState();
+        } catch (e) {
+            logError(e, 'kiro-crew: reading gateway service state failed');
+        }
+        if (this._destroyed)
+            return;
+        this._svcActive = active;
+        if (this._controlMode() === 'service') {
+            const down = active === 'inactive' || active === 'deactivating';
+            if (down && this._pendingOp !== 'start')
+                this._client.pause();
+            else if (!down && active !== 'failed' && this._client.paused &&
+                     this._pendingOp !== 'stop')
+                this._client.resume();  // started elsewhere (e.g. systemctl)
+        }
+        this._recompute();
+    }
+
+    _confirmStop() {
+        const n = this._client.online ? activeSessionCount(this._slots) : 0;
+        if (n === 0) {
+            this._stopGateway();
+            return;
+        }
+        this._closeDialog();
+        const dialog = new ModalDialog.ModalDialog({destroyOnClose: true});
+        const description = ngettext(
+            '%d session is still working. Stopping the gateway interrupts it.',
+            '%d sessions are still working. Stopping the gateway interrupts them.',
+            n).replace('%d', String(n));
+        dialog.contentLayout.add_child(new Dialog.MessageDialogContent({
+            title: _('Stop the Kiro Crew gateway?'),
+            description
+        }));
+        dialog.setButtons([
+            {
+                label: _('Cancel'),
+                action: () => dialog.close(),
+                key: Clutter.KEY_Escape,
+                default: true
+            },
+            {
+                label: _('Stop'),
+                action: () => {
+                    dialog.close();
+                    this._stopGateway();
+                }
+            }
+        ]);
+        this._dialog = dialog;
+        this._dialogDestroyId = dialog.connect('destroy', () => {
+            this._dialogDestroyId = 0;
+            this._dialog = null;
+        });
+        dialog.open();
+    }
+
+    _closeDialog() {
+        if (!this._dialog)
+            return;
+        if (this._dialogDestroyId) {
+            this._dialog.disconnect(this._dialogDestroyId);
+            this._dialogDestroyId = 0;
+        }
+        this._dialog.destroy();
+        this._dialog = null;
+    }
+
+    async _stopGateway() {
+        if (this._pendingOp)
+            return;
+        this._pendingOp = 'stop';
+        this._recompute();
+        const viaService = this._controlMode() === 'service';
+        try {
+            if (viaService) {
+                await this._service.stop();
+            } else if (await this._client.shutdownLocal()) {
+                this._manualStopped = true;
+            } else {
+                throw new Error(_('The gateway did not accept the shutdown request.'));
+            }
+        } catch (e) {
+            if (this._destroyed)
+                return;
+            this._pendingOp = null;
+            this._recompute();
+            if (!isAuthDenied(e)) {
+                logError(e, 'kiro-crew: stopping the gateway failed');
+                this._notify(_('Could not stop the gateway'), e.message ?? String(e));
+            }
+            return;
+        }
+        if (this._destroyed)
+            return;
+        this._client.pause();
+        this._watch(STOP_WATCH_S, () => (viaService
+            ? this._svcActive === 'inactive' || this._svcActive === 'failed'
+            : true));
+    }
+
+    async _startGateway() {
+        if (this._pendingOp)
+            return;
+        this._pendingOp = 'start';
+        this._recompute();
+        try {
+            await this._service.start();
+        } catch (e) {
+            if (this._destroyed)
+                return;
+            this._pendingOp = null;
+            this._recompute();
+            if (!isAuthDenied(e)) {
+                logError(e, 'kiro-crew: starting the gateway failed');
+                this._notify(_('Could not start the gateway'), e.message ?? String(e));
+            }
+            return;
+        }
+        if (this._destroyed)
+            return;
+        this._client.resume();
+        // Finished by _onOnline() once the socket connects; the watch is the
+        // timeout — after it a gateway that never came up shows red.
+        this._watch(START_WATCH_S, () => this._client.online);
+    }
+
+    /**
+     * Re-check the service every second until done() holds or the timeout
+     * passes, then settle the pending op.
+     */
+    _watch(timeoutS, done) {
+        this._cancelWatch();
+        let ticks = 0;
+        this._watchId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, WATCH_INTERVAL_S, () => {
+            ticks += WATCH_INTERVAL_S;
+            this._refreshService().then(() => {
+                if (this._destroyed || !this._watchId)
+                    return;
+                if (done() || ticks >= timeoutS)
+                    this._finishOp();
+            });
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _cancelWatch() {
+        if (this._watchId) {
+            GLib.source_remove(this._watchId);
+            this._watchId = 0;
+        }
+    }
+
+    _finishOp() {
+        this._cancelWatch();
+        this._pendingOp = null;
+        this._recompute();
     }
 
     // ---- opening links ---------------------------------------------------
 
-    _dashboardUrl() {
+    /** Dashboard page URL with the token, e.g. _pageUrl('/logs'). */
+    _pageUrl(path) {
         const base = this._settings.get_string('endpoint').replace(/\/+$/, '');
         const token = this._settings.get_string('token');
-        return token ? `${base}/?token=${encodeURIComponent(token)}` : `${base}/`;
+        // The SPA reads ?token= on any route and keeps the path.
+        return token ? `${base}${path}?token=${encodeURIComponent(token)}` : `${base}${path}`;
     }
 
     _sessionUrl(key) {
@@ -332,8 +686,14 @@ const Indicator = class {
     }
 
     _openTarget() {
+        // Nothing to open while the gateway is down on purpose: show the
+        // menu, where "Start gateway" lives.
+        if (this._state === STATE.STOPPED) {
+            this.button.menu.toggle();
+            return;
+        }
         const key = targetSlotKey(this._state, this._slots);
-        this._openUrl(key ? this._sessionUrl(key) : this._dashboardUrl());
+        this._openUrl(key ? this._sessionUrl(key) : this._pageUrl('/'));
     }
 
     _openUrl(url) {
@@ -360,13 +720,26 @@ const Indicator = class {
         const interval = Math.max(1, this._settings.get_int('poll-interval'));
         this._pollId = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT, interval, () => {
-                // Only poll as a liveness fallback when the WS is down.
-                if (!this._client.online) {
-                    this._client.fetchStatus().then(s => {
-                        if (s && !this._destroyed)
-                            this._client.reconnectNow();
-                    });
-                }
+                if (this._client.online)
+                    return GLib.SOURCE_CONTINUE;
+                // Down: notice a service started/stopped outside the menu.
+                if (this._isLocal())
+                    this._refreshService();
+                // A Stop/Start in flight owns the connection until it settles.
+                if (this._pendingOp)
+                    return GLib.SOURCE_CONTINUE;
+                // Liveness fallback while the WS is down. Also probes while
+                // paused, so a gateway started by hand is picked up.
+                this._client.fetchStatus().then(s => {
+                    if (!s || this._destroyed || this._pendingOp)
+                        return;
+                    if (this._client.paused) {
+                        this._manualStopped = false;
+                        this._client.resume();
+                    } else {
+                        this._client.reconnectNow();
+                    }
+                });
                 return GLib.SOURCE_CONTINUE;
             });
     }
@@ -420,6 +793,8 @@ const Indicator = class {
     destroy() {
         this._destroyed = true;
         this._stopPoll();
+        this._cancelWatch();
+        this._closeDialog();
 
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
@@ -436,11 +811,24 @@ const Indicator = class {
 
         this._client?.destroy();
         this._client = null;
+        this._service?.destroy();
+        this._service = null;
 
         this._destroyNotifSource();
 
+        this._animator?.destroy();
+        this._animator = null;
+
         // These are children of the button/menu and would go down with it,
         // but destroy them explicitly so ownership is unambiguous.
+        this._gatewayItem?.destroy();
+        this._gatewayItem = null;
+        this._reconnectItem?.destroy();
+        this._reconnectItem = null;
+        this._logsItem?.destroy();
+        this._logsItem = null;
+        this._openItem?.destroy();
+        this._openItem = null;
         this._endpointSub?.destroy();
         this._endpointSub = null;
         this._sessionSection?.destroy();
