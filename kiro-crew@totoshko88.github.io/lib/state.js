@@ -1,19 +1,10 @@
 /**
- * state.js — pure helpers that reduce the gateway's live slot list into a
- * single indicator state. No GJS imports here, so it stays trivially testable.
+ * state.js — reduces the gateway's live slots to one indicator state. Pure
+ * JavaScript, covered by tests/test-state.js.
  *
- * Indicator states, highest priority first:
- *   'stopped'   faded    — the gateway was stopped on purpose (service
- *                          inactive, or stopped from the menu).
- *   'auth'      dim red  — the token was rejected (401/403).
- *   'offline'   red      — the gateway is unreachable but was not stopped.
- *   'error'     red      — a critical notification, or a slot whose
- *                          mcp_report carries an error.
- *   'attention' amber    — a slot needs_input / has_options (agent asked a
- *                          question) or pending_approval (tool approval).
- *   'busy'      purple   — a slot is working: its own turn, a staged
- *                          orchestration, background subagents, or a queue.
- *   'idle'      normal   — gateway online, nothing happening.
+ * States, highest priority first: stopped (on purpose), auth (token
+ * rejected), offline, error (critical notice or failed MCP report),
+ * attention (an agent waits for a question or an approval), busy, idle.
  */
 
 export const STATE = Object.freeze({
@@ -26,7 +17,6 @@ export const STATE = Object.freeze({
     IDLE: 'idle'
 });
 
-// Priority order used to pick the aggregate when several slots disagree.
 const PRIORITY = {
     stopped: 7,
     offline: 6,
@@ -47,7 +37,6 @@ export const ICON_NAME = Object.freeze({
     idle: 'kiro-crew-idle-symbolic'
 });
 
-// CSS style class applied to the St.Icon so stylesheet.css can tint it.
 export const STYLE_CLASS = Object.freeze({
     stopped: 'kiro-crew-icon kiro-crew-stopped',
     offline: 'kiro-crew-icon kiro-crew-error',
@@ -70,11 +59,9 @@ function reportHasError(report) {
 }
 
 /**
- * Is this slot doing work? Mirrors the dashboard sidebar's "working" lane:
- * `running` is only the main agent's own turn. A session that handed work to
- * background subagents (`subagents_running`), is running a staged plan
- * (`orchestrating`), or has queued prompts (`queue_depth`) is still working
- * even while `running` is false between turns.
+ * Is this slot working? Like the dashboard sidebar: its own turn, a staged
+ * plan, background subagents, or queued prompts — `running` alone is only the
+ * main agent's turn.
  */
 function slotIsWorking(slot) {
     return Boolean(slot.running || slot.orchestrating || slot.subagents_running ||
@@ -82,14 +69,10 @@ function slotIsWorking(slot) {
 }
 
 /**
- * Reduce one slot to its own state (ignoring gateway-level signals). This is
- * the ONE rule for both the menu dots and the ghost, so the ghost is always
- * the worst dot.
- *
- * Amber is strictly "an agent is blocked on you": a tool approval or a
- * question. NOT `has_options` — those are the quick-reply suggestion chips the
- * agent leaves after a finished turn, set on nearly every idle session — and
- * NOT `interrupted`, which needs no action to keep anything going.
+ * One slot's own state. The menu dots and the ghost share this rule, so the
+ * ghost is always the worst dot. Attention means an agent is blocked on you;
+ * `has_options` (quick-reply chips left on finished turns) and `interrupted`
+ * don't count.
  */
 export function slotState(slot) {
     if (!slot || typeof slot !== 'object')
@@ -116,13 +99,10 @@ export function slotState(slot) {
 export function aggregateState({
     online, slots = [], criticalNotice = false, authError = false, stopped = false
 }) {
-    // A deliberately stopped gateway is not a fault: show the faded ghost, not
-    // red, and ignore the stale slot list and token errors of the dead socket.
+    // Stopped on purpose is not a fault, whatever the dead socket left behind.
     if (stopped)
         return STATE.STOPPED;
-    // A bad/expired token is not a gateway fault and not an agent problem.
-    // Show the muted "auth" state (dim red) so it reads as "fix your token",
-    // not as a hard error or an offline gateway.
+    // A rejected token reads as "fix your token", not as an outage.
     if (authError)
         return STATE.AUTH;
     if (!online)
@@ -140,11 +120,9 @@ export function aggregateState({
 }
 
 /**
- * Derive the dashboard SPA session id (`sid`) from a stored session key.
- * The dashboard opens a conversation via /chat?sid=<id>. /api/sessions returns
- * the history stem, where the server's safe-key mapped the surface prefix's ":"
- * to "_", so the raw key carries a prefix the sid param rejects
- * ("dashboard_chat-8-… not found"). Strip it to the bare slot id:
+ * The dashboard's `sid` for a session key. /api/sessions returns history
+ * stems where the surface prefix's ":" became "_", and /chat?sid= accepts
+ * only the bare slot id:
  *   "dashboard:chat-8-1"            -> "chat-8-1"   (live key, ":" form)
  *   "dashboard_chat-8-1"            -> "chat-8-1"   (history stem, "_" form)
  *   "dashboard_dashboard_chat-8-1"  -> "chat-8-1"   (resume round-trip stem)
@@ -163,11 +141,7 @@ export function slotName(key) {
     return s;
 }
 
-/**
- * Recency of a slot in epoch ms, for "most recently active wins". The gateway
- * sends ISO-8601 strings (or "" for a never-run session); numbers are accepted
- * too. Unknown/empty sorts last.
- */
+/** Last activity in epoch ms (the gateway sends ISO-8601); unknown sorts last. */
 export function slotRecency(slot) {
     for (const v of [slot?.last_activity_ts, slot?.last_turn_ts, slot?.last_ts]) {
         if (typeof v === 'number' && Number.isFinite(v))
@@ -181,10 +155,7 @@ export function slotRecency(slot) {
     return -Infinity;
 }
 
-/**
- * Pick the slot the icon's left-click should jump to, given the aggregate.
- * Returns the slot key, or null to open the dashboard home instead.
- */
+/** Key of the slot a left click opens for this aggregate, or null for the dashboard. */
 export function targetSlotKey(aggregate, slots = []) {
     const want = {
         [STATE.ERROR]: s => slotState(s) === STATE.ERROR,
@@ -205,10 +176,7 @@ export function targetSlotKey(aggregate, slots = []) {
     return best.key ?? null;
 }
 
-/**
- * How many sessions would be cut short by stopping the gateway right now:
- * those working or waiting on the user mid-turn.
- */
+/** Sessions a stop or restart would interrupt: working or waiting on you. */
 export function activeSessionCount(slots = []) {
     let n = 0;
     for (const s of slots) {
@@ -220,24 +188,9 @@ export function activeSessionCount(slots = []) {
 }
 
 /**
- * Does this endpoint URL point at this machine? Gateway Stop/Start drives the
- * LOCAL service, so it is only offered when the configured endpoint is
- * loopback — never for a remote gateway picked in the endpoint switcher.
- */
-export function isLoopbackEndpoint(url) {
-    const m = String(url ?? '').trim().match(/^[a-z][a-z0-9+.-]*:\/\/(\[[^\]]*\]|[^/:?#]*)/i);
-    if (!m)
-        return false;
-    const host = m[1].toLowerCase().replace(/^\[|\]$/g, '');
-    return host === 'localhost' || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host);
-}
-
-/**
- * Build the menu's session rows so the ghost always matches a visible dot.
- * `sessions` are the recent /api/sessions entries; `slots` the live slots.
- * Any non-idle live slot that is not among the recent sessions (the ghost is
- * computed over ALL slots) is pinned on top, most recently active first.
- * Titles prefer the live slot's title, then the session's, then the slot id.
+ * Menu rows from the recent sessions and the live slots. A busy live slot
+ * missing from the recent list is pinned on top, so the ghost's state always
+ * matches a visible dot.
  * @returns {Array<{key: string, title: string, state: string}>}
  */
 export function menuRows(sessions = [], slots = []) {

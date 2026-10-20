@@ -39,21 +39,21 @@ echo "=== 1. Checking for Synchronous Blocking Operations ==="
 echo ""
 
 # Check for synchronous subprocess calls
-if grep -r "Gio\.Subprocess\.new.*SYNC" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null; then
+if grep -r "Gio\.Subprocess\.new.*SYNC" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null; then
     fail "Found synchronous subprocess calls (should use async)"
 else
     pass "No synchronous subprocess calls found"
 fi
 
 # Check for synchronous file operations
-if grep -r "\.load_contents\b" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null | grep -v "async\|_async"; then
+if grep -r "\.load_contents\b" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null | grep -v "async\|_async"; then
     warn "Found potentially synchronous file operations"
 else
     pass "No synchronous file operations found"
 fi
 
 # Check for blocking sleep/wait calls
-if grep -r "GLib\.usleep\|spawn_command_line_sync" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null; then
+if grep -r "GLib\.usleep\|spawn_command_line_sync" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null; then
     warn "Found potential blocking/synchronous calls"
 else
     pass "No blocking sleep/sync calls found"
@@ -85,14 +85,14 @@ else
 fi
 
 # Check for proper signal disconnection
-if grep -r "\.disconnect(" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null | grep -q "signalId\|_signalIds\|Id"; then
+if grep -r "\.disconnect(" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null | grep -q "signalId\|_signalIds\|Id"; then
     pass "Signal disconnection found in code"
 else
     warn "No explicit signal disconnection found"
 fi
 
 # Check for timeout cleanup
-if grep -r "GLib\.source_remove" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null; then
+if grep -r "GLib\.source_remove" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null; then
     pass "Timeout cleanup (GLib.source_remove) found"
 else
     warn "No timeout cleanup found"
@@ -217,28 +217,28 @@ echo "=== 6. Checking Code Quality ==="
 echo ""
 
 # Check for console.log (should use log() or logError())
-if grep -r "console\.log\|console\.error" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null; then
+if grep -r "console\.log\|console\.error" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null; then
     warn "Found console.log/error (should use log() or logError())"
 else
     pass "No console.log/error found"
 fi
 
 # Check for proper error handling
-if grep -r "try\s*{" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null | wc -l | grep -q "[1-9]"; then
+if grep -r "try\s*{" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null | wc -l | grep -q "[1-9]"; then
     pass "Error handling (try-catch) found in code"
 else
     warn "Limited error handling found"
 fi
 
 # Check for async/await usage
-if grep -rE "async\s+\w+\s*\(|async\s*\(" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null | wc -l | grep -q "[1-9]"; then
+if grep -rE "async\s+\w+\s*\(|async\s*\(" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null | wc -l | grep -q "[1-9]"; then
     pass "Async functions found in code"
 else
     warn "No async functions found"
 fi
 
 # Check for proper Promise handling
-if grep -r "\.then(\|\.catch(" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null; then
+if grep -r "\.then(\|\.catch(" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null; then
     pass "Promise handling found in code"
 else
     info "No explicit Promise handling found (may use async/await)"
@@ -288,7 +288,7 @@ echo "=== 8. Checking Resource Management ==="
 echo ""
 
 # Check for proper object destruction
-if grep -r "destroy()" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null | grep -v "^Binary"; then
+if grep -r "destroy()" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null | grep -v "^Binary"; then
     pass "destroy() methods found for cleanup"
 else
     warn "No destroy() methods found"
@@ -302,7 +302,7 @@ else
 fi
 
 # Check for signal tracking
-if grep -r "_signalIds\|_signals\|signalId" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null; then
+if grep -r "_signalIds\|_signals\|signalId" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null; then
     pass "Signal tracking found in code"
 else
     warn "No signal tracking found (may lead to leaks)"
@@ -313,15 +313,15 @@ echo "=== 9. Checking Security ==="
 echo ""
 
 # Check for shell command injection risks
-if grep -r "GLib\.spawn\|exec\|system(" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null; then
+if grep -r "GLib\.spawn\|exec\|system(" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null; then
     warn "Found potential shell command execution (check for injection risks)"
 else
     pass "No direct shell command execution found"
 fi
 
 # Check subprocess uses array arguments (not shell strings)
-if grep -r "Gio\.Subprocess\.new" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null; then
-    if grep -A 2 "Gio\.Subprocess\.new" "$EXT"/*.js "$EXT"/lib/*.js | grep -q "\[.*\]"; then
+if grep -r "Gio\.Subprocess\.new" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null; then
+    if grep -A 2 "Gio\.Subprocess\.new" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js | grep -q "\[.*\]"; then
         pass "Subprocess uses array arguments (safe)"
     else
         warn "Subprocess may not use array arguments"
@@ -331,7 +331,7 @@ else
 fi
 
 # Check for sensitive data handling (generic token/secret check)
-if grep -r "password\|token\|secret" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null | grep -iE "log\(|logError\(|print\(" | grep -v "sanitize\|replace"; then
+if grep -r "password\|token\|secret" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null | grep -iE "log\(|logError\(|print\(" | grep -v "sanitize\|replace"; then
     warn "Found sensitive data near logging (ensure tokens/secrets are never logged)"
 else
     pass "No sensitive data logged (token/secret check)"
@@ -356,7 +356,7 @@ else
 fi
 
 # Check for code comments
-if grep -r "^[[:space:]]*//\|^[[:space:]]*\*" "$EXT"/*.js "$EXT"/lib/*.js 2>/dev/null | wc -l | grep -q "[1-9][0-9]"; then
+if grep -r "^[[:space:]]*//\|^[[:space:]]*\*" "$EXT"/*.js "$EXT"/lib/*.js "$EXT"/shell/*.js "$EXT"/prefs/*.js 2>/dev/null | wc -l | grep -q "[1-9][0-9]"; then
     pass "Code comments found"
 else
     warn "Limited code comments found"

@@ -1,12 +1,12 @@
 {
     "uuid": "kiro-crew@totoshko88.github.io",
     "name": "Kiro Crew",
-    "description": "Command your own AI crew from the GNOME top bar. One glance tells you what every agent is doing — the ghost glows Kiro purple while they work, amber when one needs you, red when something breaks. Click to jump straight to the session that wants you. Your crew runs on YOUR machine via the local Kiro Crew gateway; this is the control panel.",
-    "shell-version": [ "45", "46", "47", "48", "49", "50" ],
+    "description": "Command your own AI crew from the GNOME top bar. One glance tells you what every agent is doing — the ghost glows Kiro purple while they work, amber when one needs you, red when something breaks. Click to jump straight to the session that wants you. Your crew runs on YOUR machine via the local Kiro Crew gateway; this is the control panel.\n\nOptional: watch gateways on other machines through an SSH tunnel the extension opens with your SSH key (runs the ssh command), and control them over SSH if you allow it per profile.",
+    "shell-version": [ "45", "46", "47", "48", "49", "50", "51" ],
     "url": "https://github.com/totoshko88/kiro-crew-gnome",
     "settings-schema": "org.gnome.shell.extensions.kiro-crew",
     "gettext-domain": "kiro-crew",
-    "version-name": "0.1.2",
+    "version-name": "0.1.3",
     "version": 2,
     "donations": {
         "custom": [

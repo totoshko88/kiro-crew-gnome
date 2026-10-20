@@ -4,7 +4,7 @@
 
 # Kiro Crew — command your crew from the GNOME top bar 👻
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--50-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.2-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml) [![Get it on GNOME Extensions](https://img.shields.io/badge/GNOME%20Extensions-Install-4A86CF?logo=gnome)](https://extensions.gnome.org/extension/11123/kiro-crew/)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--51-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.3-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml) [![Get it on GNOME Extensions](https://img.shields.io/badge/GNOME%20Extensions-Install-4A86CF?logo=gnome)](https://extensions.gnome.org/extension/11123/kiro-crew/)
 
 **Your AI crew is working right now — do you know what it's doing?**
 
@@ -104,7 +104,7 @@ That's it. On a normal local setup the extension **fetches its own access token*
 
 ## Requirements
 
-- GNOME Shell 45–50.
+- GNOME Shell 45–51.
 - A running Kiro Crew gateway (default `http://localhost:5476`).
 
 ## How it reads your crew
@@ -114,8 +114,19 @@ That's it. On a normal local setup the extension **fetches its own access token*
   own turn, staged plan, background subagents or queued prompts; waiting =
   a question or a tool approval; plus `mcp_report` errors), then all slots are
   folded into one indicator state (`lib/state.js`).
+- **Gateway profiles** — one profile per gateway, each with its own token. A
+  **local** profile is the gateway on this computer and gets the full menu. A
+  **remote** profile is another machine, reached through an SSH tunnel the
+  extension opens itself (`ssh -N -L 127.0.0.1:<local>:localhost:<port>
+  user@host`, key-based login) and keeps alive. You enter the remote port; the
+  local end is picked automatically (remote port + 10000, then the next free
+  one) and never collides with a gateway on this computer. Turn on **Allow
+  control over SSH** to manage it like a local one (token, stop/start, restart,
+  update — fixed commands over the same SSH key); otherwise it is read-only — no gateway
+  controls, and this computer's local secret is never sent to it. See
+  [Adding a remote gateway](docs/USERGUIDE.md#adding-a-remote-gateway-ssh-tunnel).
 - **Gateway Stop / Start** — the only actions that change anything, and only
-  when you pick them in the menu. A gateway installed with
+  when you pick them in the menu (local profile only). A gateway installed with
   `kirocrew service install` is driven through systemd's D-Bus API
   (`kirocrew.service`, system or user unit; GNOME asks for your password via
   polkit for a system unit). A hand-run `kirocrew gateway` is stopped through
@@ -148,12 +159,13 @@ make validate         # GNOME review-guideline checks
 
 ```
 kiro-crew@totoshko88.github.io/
-  extension.js   indicator, menu, lifecycle, auto-token
-  prefs.js       Adwaita preferences (endpoint, token, Fetch / Open buttons)
-  lib/client.js  Soup HTTP + WebSocket client (auth, reconnect, local bootstrap)
-  lib/service.js kirocrew.service Stop/Start/state over systemd D-Bus
-  lib/animator.js one-shot icon motion on state changes
-  lib/state.js   slot list → aggregate icon state (pure, testable)
+  extension.js   entry point: enable() / disable()
+  shell/         GNOME Shell process: indicator, menu, connection, lifecycle,
+                 updates, HTTP/WebSocket client, systemd D-Bus, SSH tunnel
+  prefs.js       preferences window
+  prefs/         preferences process: gateway profile editor
+  lib/           shared by both, no UI: state reducer, profile model and
+                 store, SSH control commands
   schemas/       GSettings schema
   icons/         five symbolic states (idle / busy / attention / error / stopped)
   stylesheet.css status tints

@@ -9,12 +9,13 @@ all: schemas
 # Run the pure-logic unit tests (no gnome-shell required).
 test-logic:
 	gjs -m tests/test-state.js
+	gjs -m tests/test-profiles.js
 
 # Lint the extension sources with ESLint. No-op (with a note) if eslint is not
 # installed, so a source checkout without node_modules can still run `make lint`.
 lint:
 	@if command -v eslint >/dev/null 2>&1 || [ -x node_modules/.bin/eslint ]; then \
-		npx eslint "$(SRC)/*.js" "$(SRC)/lib/*.js"; \
+		npx eslint "$(SRC)/*.js" "$(SRC)/lib/*.js" "$(SRC)/shell/*.js" "$(SRC)/prefs/*.js"; \
 	else \
 		echo "eslint not installed (run 'npm ci'); skipping lint"; \
 	fi
@@ -27,7 +28,12 @@ validate:
 schemas:
 	glib-compile-schemas $(SRC)/schemas
 
+# Replace the installed copy, never overwrite its files in place: a running
+# shell mmaps schemas/gschemas.compiled, and rewriting that file under it makes
+# the next settings read abort the whole shell. Unlinking keeps the old inode
+# alive for whoever still maps it.
 install: schemas
+	rm -rf "$(INSTALL)"
 	mkdir -p "$(INSTALL)"
 	cp -r $(SRC)/* "$(INSTALL)/"
 	@echo "Installed. Log out/in (Wayland) or Alt+F2 'r' (X11), then:"

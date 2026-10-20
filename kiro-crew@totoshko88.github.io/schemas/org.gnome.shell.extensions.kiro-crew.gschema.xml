@@ -3,22 +3,41 @@
   <schema id="org.gnome.shell.extensions.kiro-crew"
           path="/org/gnome/shell/extensions/kiro-crew/">
 
+    <key name="profiles" type="aa{ss}">
+      <default>[]</default>
+      <summary>Gateway profiles</summary>
+      <description>One entry per gateway: id, name, host, port (the gateway's port on that host), token and kind (local or remote). Each gateway keeps its own token. A remote host is reached through an SSH tunnel whose local port is picked automatically. Empty means "migrate from the 0.1.2 settings on next start".</description>
+    </key>
+
+    <key name="tunnel-port" type="i">
+      <default>0</default>
+      <range min="0" max="65535"/>
+      <summary>Local end of the open SSH tunnel (read-only)</summary>
+      <description>Written by the extension: the 127.0.0.1 port the active remote profile's tunnel listens on, 0 when no tunnel is open. Picked automatically and never equal to the remote port. Settings reads it to open the remote dashboard.</description>
+    </key>
+
+    <key name="active-profile" type="s">
+      <default>''</default>
+      <summary>Active gateway profile</summary>
+      <description>The id of the profile the indicator is connected to. Unknown or empty falls back to the first profile.</description>
+    </key>
+
     <key name="endpoint" type="s">
       <default>'http://localhost:5476'</default>
-      <summary>Gateway base URL</summary>
-      <description>Base URL of the Kiro Crew gateway dashboard, e.g. http://localhost:5476</description>
+      <summary>Legacy gateway URL (0.1.2)</summary>
+      <description>Read once to migrate a 0.1.2 setup to profiles; no longer used afterwards.</description>
     </key>
 
     <key name="endpoints" type="as">
       <default>['http://localhost:5476']</default>
-      <summary>Saved endpoints</summary>
-      <description>List of gateway base URLs the user can switch between from the menu.</description>
+      <summary>Legacy saved endpoints (0.1.2)</summary>
+      <description>Read once to migrate a 0.1.2 setup to profiles; no longer used afterwards.</description>
     </key>
 
     <key name="token" type="s">
       <default>''</default>
-      <summary>Dashboard access token</summary>
-      <description>Token used to authenticate against the gateway (passed as ?token=). The extension cannot mint this; paste a token obtained from the dashboard.</description>
+      <summary>Legacy access token (0.1.2)</summary>
+      <description>Read once to migrate a 0.1.2 setup to profiles (it becomes the token of the then-active endpoint); no longer used afterwards.</description>
     </key>
 
     <key name="browser" type="s">
@@ -45,6 +64,16 @@
       <range min="5" max="300"/>
       <summary>Fallback poll interval (seconds)</summary>
       <description>How often to poll /api/status when the WebSocket is unavailable.</description>
+    </key>
+
+    <key name="channel" type="s">
+      <choices>
+        <choice value="stable"/>
+        <choice value="insider"/>
+      </choices>
+      <default>'stable'</default>
+      <summary>Release channel</summary>
+      <description>Gateway release channel to track: stable (recommended) or insider (early features). Changing this asks the gateway to switch channels; the move takes effect on the next update.</description>
     </key>
 
   </schema>
