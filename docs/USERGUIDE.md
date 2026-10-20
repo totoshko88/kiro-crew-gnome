@@ -23,7 +23,7 @@ You need **two** things:
    The gateway should now answer at `http://localhost:5476`. Open that in a
    browser once to confirm it loads.
 
-2. **GNOME Shell 45 to 50.** Check with:
+2. **GNOME Shell 45 to 51.** Check with:
 
    ```bash
    gnome-shell --version
@@ -92,6 +92,10 @@ To read your crew's state, the extension needs an **access token** for the gatew
   **Fetch** (runs the same local bootstrap) or **Open** to open the dashboard
   and copy a token into the field yourself.
 
+- **Remote gateways.** The automatic path works only for the gateway on this
+  computer. A remote gateway's token is pasted into its profile by hand — see
+  [Adding a remote gateway](#adding-a-remote-gateway-ssh-tunnel).
+
 ---
 
 ## 4. Reading the ghost
@@ -141,10 +145,11 @@ Right-click (secondary button) opens the menu:
   session that isn't among the recent ones is pinned to the top.
 - **Open dashboard** — the dashboard home.
 - **Gateway logs** — the dashboard's live log viewer.
-- **Endpoint** — switch between the gateway URLs you saved in Settings (handy if
-  you run more than one gateway, e.g. a local one and a container).
-- **Stop gateway / Start gateway** — shown for a gateway on this machine
-  (`localhost` endpoint):
+- **Profile** — switch between your gateway profiles (see
+  [Gateway profiles](#gateway-profiles)). Each profile carries its own token;
+  a remote one also opens its own SSH tunnel.
+- **Stop gateway / Start gateway**, **Restart gateway**, **Check for updates**
+  — shown only for a **local** profile (the gateway on this computer):
   - Installed as a service (`kirocrew service install`): stops and starts
     `kirocrew.service` through systemd. For the system service GNOME asks for
     your password (polkit); it remembers it for a few minutes. A stopped
@@ -169,16 +174,131 @@ Open with the menu's **Settings**, or:
 gnome-extensions prefs kiro-crew@totoshko88.github.io
 ```
 
-**Connection**
-- **Gateway URL** — default `http://localhost:5476`.
-- **Access token** — usually filled automatically; you can paste one here.
-- **Open dashboard** — opens the gateway in your default browser. The browser
-  session's login outlives the extension, so this is the reliable place to grab
-  a fresh token.
-- **Fetch token automatically** — runs the local bootstrap and fills the token
-  field. Use it if the ghost is dim-red and hasn't recovered on its own.
-- **Saved endpoints** — comma-separated list; these show up in the menu's
-  *Endpoint* submenu.
+### Gateway profiles
+
+A **profile** is one gateway. Each profile has:
+
+| Field | What to enter |
+|---|---|
+| **Profile name** | Any label, shown in the menu (`This computer`, `Home server`) |
+| **Host** | IP or hostname. Use `user@host` when your SSH user on that machine differs (`anton@192.168.0.131`) |
+| **Port** | The gateway's port **on that host** (`5476` by default) |
+| **Access token** | That gateway's own token. Tokens are per gateway: one never works on another |
+| **Gateway runs on** | Shown only for `localhost`: **This computer (local)** or **Another machine (remote)** |
+
+**Local** is the gateway on this computer. It gets the full menu — Stop/Start,
+Restart, Check for updates, the release channel — and its token is fetched
+automatically through the local bootstrap. Stop/Start go through systemd only
+when `kirocrew.service` listens on **this profile's port** (read from the
+unit's `KIROCREW_PORT`, `/etc/kirocrew/kirocrew.env` overriding it, default
+5476); a local profile on another port never stops that unit.
+
+**Remote** is a gateway on another machine. By default it is **read-only**: you
+see its sessions and status, the menu has no gateway controls, and the
+extension never sends this computer's local secret to it. Turn on **Allow
+control over SSH** in the profile to manage it like a local one (see
+[Controlling a remote gateway over SSH](#controlling-a-remote-gateway-over-ssh)).
+
+- **Active profile** picks the one the ghost follows (the menu's **Profile**
+  submenu does the same).
+- **+** in the group header adds a profile. Edits apply when you press
+  **Save**, not while you type.
+- **Delete** removes a profile. The last profile, and the last *local*
+  profile, can't be deleted — the gateway on this computer always stays
+  reachable.
+- **Open dashboard** opens the active profile's dashboard — the place to copy a
+  fresh token.
+- **Fetch** runs the local bootstrap and fills the token — on this computer
+  for a local profile, on the remote host over SSH for a profile with SSH
+  control. Press **Save** to keep it.
+
+Upgrading from 0.1.2: your old Gateway URL, saved endpoints and token become
+profiles on first start. `localhost:5476` becomes the local profile; any other
+`localhost` port is assumed to be a tunnel you run yourself and becomes a
+read-only remote profile; a LAN address becomes a remote profile with an SSH
+tunnel. The old token goes to the profile that was active.
+
+### Adding a remote gateway (SSH tunnel)
+
+A remote gateway is never exposed on the network. The gateway binds to
+`localhost` on its machine, and you reach it through an SSH tunnel — the
+extension opens and maintains that tunnel for you.
+
+Once, on this computer:
+
+```bash
+ssh-copy-id anton@192.168.0.131   # key-based login: the tunnel can't type a password
+ssh anton@192.168.0.131 true      # accept the host key once
+```
+
+Then in **Settings → Gateway profiles → +**:
+
+1. **Profile name** `Home server`, **Host** `anton@192.168.0.131`,
+   **Port** `3676` — the gateway's port **on that machine**. You never enter a
+   local port; the extension picks it.
+2. **Access token** — open that gateway's dashboard (through the tunnel, or on
+   that machine), copy a token, and paste it. **Fetch** can't help here: it
+   reads a secret file that only exists on the gateway's own machine.
+3. **Save**, then pick the profile under **Active profile** or in the menu.
+
+When the profile is active, the extension runs the equivalent of
+
+```bash
+ssh -N -L 127.0.0.1:13676:localhost:3676 anton@192.168.0.131
+```
+
+and keeps it open: it restarts the tunnel if it drops, with backoff, and
+closes it when you switch profiles or disable the extension. The forward binds
+`127.0.0.1` only, so the tunnel isn't reachable from your LAN.
+
+**The local end is never the remote port.** Your own gateway may use the same
+number (a local gateway on `3676` and a remote one on `3676`), so the tunnel
+uses remote port + 10000 — `3676` → `13676`, `5476` → `15476`. It skips the
+ports of your local profiles and any port something on this computer is
+already listening on, taking the next free one, and it re-picks on every
+(re)start. The active profile's subtitle in Settings shows the port in use
+(`→ 127.0.0.1:13676`); **Open dashboard** uses it.
+
+### Controlling a remote gateway over SSH
+
+With **Allow control over SSH** on, the extension uses the same SSH key as the
+tunnel to run a short, fixed list of commands on that host. Nothing you type
+goes into them — only constants and the profile's port number:
+
+| Action | Command on the remote host |
+|---|---|
+| Token | `/api/token/local` on its own `127.0.0.1:<port>`, with its own `~/.kiro/crew/.local_secret` — the secret never leaves the host |
+| Service state | `systemctl show kirocrew.service` + `/etc/kirocrew/kirocrew.env` (to match the port) |
+| Stop / Start / Restart | `sudo -n systemctl stop\|start\|restart kirocrew.service` |
+| Update | `~/.local/bin/kirocrew update`, then `sudo -n systemctl restart kirocrew.service` |
+
+The menu then shows Stop/Start, Restart, Check for updates and the release
+channel for that profile, and an expired token is refetched on its own, just
+like the local gateway.
+
+Prepare the host once:
+
+```bash
+# on the remote host, as the user that owns the gateway
+KIROCREW_PORT=3676 kirocrew service install   # system unit, survives reboot and logout
+sudo loginctl enable-linger "$USER"            # keeps agent runtimes alive without a login
+kirocrew config set dashboard.url http://localhost:3676
+```
+
+`sudo -n` means no password prompt: Stop/Start/Restart/Update need
+passwordless sudo for `systemctl` (or the whole account) on that host. Without
+it those actions fail with sudo's error, while the token and the state still
+work. If the remote gateway runs by hand rather than as `kirocrew.service`,
+there are no Stop/Start items — only Restart and Update over the dashboard API.
+
+Keep the gateway on the remote host bound to `localhost` — that's its default.
+Don't expose its port on the LAN (an old `socat` forwarder, a `0.0.0.0` bind):
+the tunnel is the only way in.
+
+Already run the tunnel yourself (autossh, a systemd unit)? Make a profile with
+**Host** `localhost`, **Port** = your local forward port, and **Gateway runs on**
+= **Another machine (remote)**. The extension then opens no tunnel, and still
+hides the gateway controls.
 
 **Browser**
 - **Open links with** — system default, or a specific browser for all the
@@ -216,8 +336,32 @@ gnome-extensions info kiro-crew@totoshko88.github.io
 service: stopping a system unit is an admin action. Cancel and nothing
 changes. To avoid the prompt, run the gateway as a user service or by hand.
 
-**Stop/Start is missing from the menu.** It only appears for a `localhost`
-endpoint, and for a hand-run gateway only while it is reachable.
+**Stop/Start is missing from the menu.** It only appears for a **local**
+profile, and for a hand-run gateway only while it is reachable. A remote
+profile — including a `localhost` one marked *Another machine* — never shows
+gateway controls.
+
+**"SSH tunnel down — retrying".** The extension couldn't open or keep the
+tunnel for a remote profile; the menu shows ssh's own error under it. The
+usual causes:
+- `Permission denied (publickey…)` — no key login yet: run `ssh-copy-id`.
+- `Host key verification failed` — connect once by hand to accept the key.
+- `Address already in use` — something grabbed the local port between the
+  check and ssh's own bind; the next retry picks another port by itself.
+- `Could not resolve hostname` / `Connection timed out` — wrong host, or the
+  machine is off.
+
+**Remote profile is dim red.** Its token expired. With **Allow control over
+SSH** it is refetched on its own (or press **Fetch**). Without it, open that
+gateway's dashboard, copy a new token, paste it into the profile and **Save**.
+
+**Stop on a remote profile says "sudo: a password is required".** The host
+needs passwordless sudo for `systemctl`; see
+[Controlling a remote gateway over SSH](#controlling-a-remote-gateway-over-ssh).
+
+**Stop/Start missing for a local profile.** The profile's port doesn't match
+the port `kirocrew.service` listens on, so the extension won't touch that unit.
+Fix the profile's port, or the unit's `KIROCREW_PORT`.
 
 **Session dots are all grey even though agents are running.** Make sure the gateway is reachable and the token is valid (dim red = token). If the live connection is down, the menu falls back to polling and dots can lag; use **Reconnect**.
 
@@ -244,4 +388,4 @@ Then reload the shell (log out / in on Wayland).
 
 ## 10. Privacy note
 
-This extension talks **only** to your local gateway over loopback. It reads state (sessions, slots, status, notifications) and opens URLs in your browser. The only thing it ever changes is the gateway's running state, and only when you choose **Stop gateway** / **Start gateway** in the menu. It never sends your data anywhere else, never calls any other mutating gateway endpoint, and never mints a credential by the security-gated path — it only uses the sanctioned local bootstrap that already trusts same-machine processes.
+This extension talks **only** to your gateways: the local one over loopback, a remote one through an SSH tunnel bound to `127.0.0.1`. It reads state (sessions, slots, status, notifications) and opens URLs in your browser. It changes things only when you pick an action — Stop/Start, Restart, Update, or a release-channel switch — and only on the local gateway or on a remote one where you turned on **Allow control over SSH**. Any other remote gateway is read-only. The extension never sends your data anywhere else, never sends this computer's local secret to a remote gateway, and never mints a credential by the security-gated path — it only uses the sanctioned local bootstrap that already trusts same-machine processes.

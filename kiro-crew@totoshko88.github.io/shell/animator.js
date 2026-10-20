@@ -1,17 +1,8 @@
 /**
- * animator.js — short, one-shot "body language" for the panel ghost when its
- * state changes, borrowing the motion vocabulary of the Kiro Crew dashboard
- * companion (kg-fly float, kg-error head shake) — motion only, no assets.
- *
- *   → busy       a gentle float (two slow bobs): "on it"
- *   → attention  two quick hops: "hey, over here"
- *   → error      a decaying head shake (also offline/auth)
- *   busy → idle  one small hop: "done"
- *   → stopped    nothing (the ghost just fades)
- *
- * Every animation is finite and ends at rest, so the panel is never repainted
- * continuously. Nothing runs when the user turned animations off
- * (Settings → Accessibility → Reduce animation / enable-animations).
+ * animator.js — one-shot motion of the panel icon on a state change: a float
+ * when work starts, hops when an agent needs you, a small hop when work ends,
+ * a head shake on a problem. Every animation is finite and ends at rest, and
+ * none runs when animations are turned off.
  */
 
 import St from 'gi://St';
@@ -23,7 +14,8 @@ export class IconAnimator {
     /** @param {St.Widget} actor the panel icon */
     constructor(actor) {
         this._actor = actor;
-        this._gen = 0;  // bumps on every start/stop; stale chains bail out
+        // Bumped by stop(); a running keyframe chain from an older run ends.
+        this._gen = 0;
         actor.set_pivot_point(0.5, 0.5);
     }
 
@@ -53,7 +45,7 @@ export class IconAnimator {
     _float() {
         if (!this._begin())
             return;
-        // up-down, up-down (autoReverse with an odd repeat ends at rest).
+        // autoReverse with an odd repeat count ends at rest.
         this._actor.ease({
             translation_y: -2,
             duration: 450,
@@ -79,7 +71,6 @@ export class IconAnimator {
         const gen = this._begin();
         if (!gen)
             return;
-        // Decaying rotation keyframes, chained (kg-error's -9/8/-7/6/-4/2).
         const steps = [-12, 10, -8, 6, -3, 0];
         const next = i => {
             if (gen !== this._gen || !this._actor || i >= steps.length)
@@ -94,9 +85,9 @@ export class IconAnimator {
         next(0);
     }
 
-    /** Cancel whatever is running and put the icon back at rest. */
+    /** Stop any motion and put the icon back at rest. */
     stop() {
-        // Start at 1 so a fresh generation is always truthy for _begin().
+        // Never 0, which _begin() returns for "animations off".
         this._gen = this._gen + 1 || 1;
         if (!this._actor)
             return;

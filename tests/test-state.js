@@ -9,7 +9,7 @@ const stateUrl = `file://${here}/../kiro-crew@totoshko88.github.io/lib/state.js`
 
 const {
     STATE, aggregateState, slotState, targetSlotKey, slotName,
-    slotRecency, activeSessionCount, isLoopbackEndpoint, menuRows
+    slotRecency, activeSessionCount, menuRows
 } = await import(stateUrl);
 
 let fail = 0;
@@ -105,12 +105,6 @@ eq(slotRecency({}), -Infinity, 'slotRecency unknown sorts last');
     eq(rows.some(r => r.state === worst), true, 'ghost state is visible as a dot');
 }
 
-eq(isLoopbackEndpoint('http://localhost:5476'), true, 'loopback localhost');
-eq(isLoopbackEndpoint('http://127.0.0.1:5476/'), true, 'loopback 127.0.0.1');
-eq(isLoopbackEndpoint('http://[::1]:5476'), true, 'loopback ::1');
-eq(isLoopbackEndpoint('https://crew.example.com'), false, 'remote host');
-eq(isLoopbackEndpoint('http://localhost.example.com'), false, 'localhost lookalike');
-eq(isLoopbackEndpoint(''), false, 'empty endpoint');
 
 eq(slotName('dashboard:my-chat'), 'my-chat', 'slotName strips dashboard: prefix');
 eq(slotName('dashboard_chat-8-1790892507'), 'chat-8-1790892507', 'slotName strips single dashboard_ stem');

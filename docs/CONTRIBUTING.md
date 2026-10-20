@@ -27,25 +27,63 @@ make test-logic
 
 ### Architecture
 
+The code is split by the process it runs in, so a reviewer can see at a
+glance what may import what:
+
+| Directory | Runs in | May import |
+|---|---|---|
+| `shell/` | GNOME Shell only | St, Clutter, Shell UI; never GTK/Adw |
+| `prefs/` | the preferences process only | GTK, Adw; never St/Clutter/Shell UI |
+| `lib/` | both | Gio/GLib at most; no UI toolkit |
+
 | File | Purpose |
 |------|---------|
-| `kiro-crew@totoshko88.github.io/extension.js` | Lifecycle, top-bar indicator, and menu |
-| `kiro-crew@totoshko88.github.io/lib/client.js` | Soup HTTP + WebSocket client (auth, reconnect) |
-| `kiro-crew@totoshko88.github.io/lib/service.js` | `kirocrew.service` state and Stop/Start over systemd D-Bus |
-| `kiro-crew@totoshko88.github.io/lib/animator.js` | One-shot icon motion on state changes |
-| `kiro-crew@totoshko88.github.io/lib/state.js` | Pure reducer: slot list → aggregate indicator state |
-| `kiro-crew@totoshko88.github.io/prefs.js` | Adwaita preferences (gateway URL, token) |
+| `extension.js` | Entry point: `enable()` creates the indicator, `disable()` destroys it |
+| `shell/indicator.js` | The panel button: icon state, session list, settings wiring, fallback poll |
+| `shell/menu.js` | The popup menu (a view: holds no state) |
+| `shell/connection.js` | The active profile's client, SSH tunnel, SSH control and token |
+| `shell/lifecycle.js` | Stop / Start / Restart and the service state they depend on |
+| `shell/updates.js` | Check for updates, Update, release channel |
+| `shell/client.js` | Soup HTTP + WebSocket transport (auth, reconnect, local bootstrap) |
+| `shell/service.js` | Local `kirocrew.service` over systemd D-Bus (state, port, stop/start) |
+| `shell/tunnel.js` | The `ssh -N -L` process of a remote profile (start, backoff restart, stop) |
+| `shell/notifier.js`, `shell/confirm.js` | Message-tray source; the "are you sure?" dialog |
+| `shell/animator.js` | One-shot icon motion on state changes |
+| `lib/state.js` | Pure reducer: slot list → aggregate indicator state |
+| `lib/profiles.js` | Pure profile model: kinds, URLs, ssh argv, remote commands, migration |
+| `lib/profileStore.js` | Profiles in GSettings (read, write, migrate) |
+| `lib/remote.js` | Runs the fixed SSH control commands of a remote profile |
+| `lib/cancel.js` | Cancellation helpers |
+| `prefs.js` | Preferences window |
+| `prefs/profiles.js` | Gateway profile editor |
 
 ### Key Principles
 
 - All network I/O must be async (no blocking calls on the main loop)
-- Clean up every resource in `disable()` (sources, signals, the WebSocket)
-- No GTK/Adw imports in `extension.js` (it runs in the Shell process)
+- Clean up every resource in `disable()` (sources, signals, the WebSocket,
+  subprocesses); the class that creates a resource destroys it
+- No lifecycle flags such as `_destroyed`: every async operation takes its
+  owner's `Gio.Cancellable`, so after `destroy()` it rejects with
+  `G_IO_ERROR_CANCELLED` and no code runs past the `await`
+  (`logUnlessCancelled()` keeps that silent)
+- Respect the process split above (CI checks the imports)
 - Follow the [EGO Review Guidelines](https://gjs.guide/extensions/review-guidelines/review-guidelines.html)
 - Never mint credentials. The extension is read-only against the gateway; the
-  only exception is the user-initiated Stop/Start of a loopback gateway
-  (systemd D-Bus, or `POST /api/shutdown` for a hand-run gateway)
-- No subprocesses or `sudo`; privileged actions go through polkit
+  only exceptions are user-initiated actions on a **local** profile:
+  Stop/Start (systemd D-Bus, or `POST /api/shutdown` for a hand-run gateway),
+  Restart, Update and the release-channel switch, and the same on a remote
+  profile with SSH control. Any other remote profile is read-only, and the
+  local secret is never sent to a remote gateway
+- No local `sudo`; local privileged actions go through polkit. Subprocesses
+  are only ssh: the tunnel (`shell/tunnel.js`) and, for a profile with SSH
+  control, the fixed commands from `remoteCommand()` (`lib/profiles.js`, run by `lib/remote.js`). Always
+  async `Gio.Subprocess` with an argv array (no local shell), killed on
+  `disable()`. Remote command strings are built from constants and a parsed
+  port only — never from profile text
+- Stop/Start target `kirocrew.service` only when its port matches the
+  profile's port
+- Locality comes from the profile's kind, never from the URL: a tunnel also
+  listens on `localhost`
 - Animations must be finite (no continuous panel repaint) and respect
   `enable-animations`
 

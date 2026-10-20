@@ -2,6 +2,40 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3]
+
+### Added
+
+- **Gateway update lifecycle in the menu.** A **Check for updates** item reads the gateway's own update state (`GET /api/update/check`); when a newer release is out it becomes **Update to _x.y.z_**. If the gateway can apply the update itself it does so (`POST /api/update`) and restarts; otherwise (a pipx, package, or Docker install it does not manage) the extension points you at the dashboard, which owns that install's update flow — the extension never runs the installer.
+- **Restart gateway** menu item for a reachable local gateway, through the gateway's own in-place restart (`POST /api/restart`). Works for a hand-run or pipx-managed gateway, not only a systemd unit. If sessions are still working, you're asked to confirm first.
+- **Release channel** switcher in Settings (**Stable** / **Insider**). The extension mirrors the local gateway's current channel into the setting, so it shows the truth (a gateway installed on insider reads as Insider). Changing it asks the running gateway to switch channels (`POST /api/update/channel`); the move takes effect on the gateway's next update. A new `channel` GSettings key records the choice.
+- **Gateway profiles.** Each gateway is a profile with a name, host, port and its own access token (new `profiles` and `active-profile` GSettings keys). Switch between them from **Settings → Gateway profiles** or the menu's **Profile** submenu; the token always travels with its gateway. Edits apply on **Save**, not on every keystroke.
+- **Remote gateways over SSH.** A profile on another machine is reached through an SSH tunnel the extension opens and keeps alive itself (`ssh -N -L 127.0.0.1:<local>:localhost:<port> user@host`, key-based login), restarting it with backoff if it drops and closing it on a profile switch or disable. You enter only the remote port. The local end is never that port: it is remote port + 10000 (`3676` → `13676`), skipping the ports of your local profiles and anything already listening here, and re-picked on every start — so a local gateway and a remote one can both use `3676`. The menu shows *SSH tunnel down — retrying* with ssh's own error when it can't connect.
+- **Control a remote gateway over SSH** (opt-in per profile, **Allow control over SSH**). The token is minted on the remote host's own loopback (its secret never leaves it) and refetched on its own when it expires; Stop/Start/Restart drive the host's `kirocrew.service` with `sudo -n systemctl`; Update runs `kirocrew update` there. Only a fixed set of commands built from constants and the profile's port is ever sent.
+- **Local / remote switch for `localhost` profiles.** A tunnel you run yourself also listens on `localhost`, so a `localhost` profile can be marked **Another machine (remote)**: no gateway controls, no tunnel opened, and the local secret is never sent to it.
+- GNOME Shell **51** added to the supported versions.
+
+### Changed
+
+- The code is split into modules by process: `extension.js` is only `enable()`/`disable()`, shell-only code lives in `shell/`, preferences-only code in `prefs/`, and code both use in `lib/` (no UI imports, checked in CI). The indicator, menu, gateway connection, lifecycle and updates are separate classes, each cleaning up what it creates.
+- Async work is cancelled instead of guarded: each owner passes its `Gio.Cancellable` to every request, D-Bus call and ssh command, so after `disable()` they reject with `G_IO_ERROR_CANCELLED` and nothing runs past the `await`. The `_destroyed` flag is gone.
+- Whether a gateway is "this computer" now comes from its profile's kind, not from its URL being `localhost`. Update, channel, restart and stop/start are offered only for a local profile; a remote profile is read-only.
+- The 0.1.2 settings (Gateway URL, saved endpoints, token) are migrated to profiles on first start. `localhost:5476` becomes the local profile, any other `localhost` port a read-only remote profile, and a LAN address a remote profile with an SSH tunnel. The old token goes to the profile that was active; tokens for other gateways need to be pasted once.
+
+### Fixed
+
+- With a tunnel on `localhost`, the extension took the remote gateway for the local one: it offered Stop/Restart/Update for it (Stop would have stopped this computer's `kirocrew.service`), mirrored the remote gateway's channel, and on an expired token sent this computer's local secret to the remote gateway.
+- A tunnel on the same local port as a gateway on this computer could shadow it, and `localhost` resolves to `::1` first, so the client could reach a local service instead of the tunnel. The tunnel's local end is now separate from every local profile's port, and the client talks to it on `127.0.0.1`.
+- Stop/Start drove `kirocrew.service` for any local profile, whatever its port, so a profile pointing at another port (for example a migrated `localhost:3676`) stopped the real gateway on 5476. The unit is now controlled only when its port (`KIROCREW_PORT`, with `/etc/kirocrew/kirocrew.env` overriding it, default 5476) matches the profile's.
+- The last local profile could be deleted, leaving the gateway on this computer out of reach. It can't be any more.
+- An ssh or API failure during Stop/Start threw a TypeError while checking for a dismissed polkit prompt, so the error notification never appeared.
+- Switching gateways lost the token. Editing the URL saved and swapped tokens on every keystroke, and the extension and the preferences window both rewrote the same keys, so one could store a token under the wrong URL or overwrite it with an empty one.
+
+### Security
+
+- The new update, channel and restart actions run only for a **local** profile, with the dashboard token, and only on an explicit menu or Settings action. A remote profile gets no gateway controls, and the local secret is never sent to it.
+- The one subprocess is the SSH tunnel of a remote profile: an argv array (no shell), a validated host after `--`, a forward bound to `127.0.0.1` only, and `BatchMode` so it never handles a password. See [SECURITY.md](docs/SECURITY.md).
+
 ## [0.1.2]
 
 ### Fixed

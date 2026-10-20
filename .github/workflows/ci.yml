@@ -73,9 +73,9 @@ jobs:
             exit 1
           fi
 
-          # GTK/Adw must not be imported from the shell-process extension.js.
-          if grep -E "^import.*(Gtk|Adw)" "$UUID/extension.js"; then
-            echo "ERROR: GTK/Adw imports not allowed in extension.js"
+          # GTK/Adw/Gdk must not be imported into the shell process.
+          if grep -nE "from 'gi://(Gtk|Gdk|Adw)'" "$UUID/extension.js" "$UUID"/shell/*.js; then
+            echo "ERROR: GTK/Adw imports not allowed in shell-process code"
             exit 1
           fi
 
@@ -83,14 +83,20 @@ jobs:
           # modules (resource:///org/gnome/shell/ui/...). The ExtensionPreferences
           # base class at resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js
           # is the sanctioned GNOME 45+ prefs import and MUST be allowed.
-          if grep -E "resource:///org/gnome/shell/ui" "$UUID/prefs.js"; then
-            echo "ERROR: Shell UI resource import not allowed in prefs.js"
+          if grep -E "resource:///org/gnome/shell/ui|gi://(St|Clutter|Meta|Shell)'" "$UUID/prefs.js" "$UUID"/prefs/*.js; then
+            echo "ERROR: Shell UI resource import not allowed in prefs code"
+            exit 1
+          fi
+
+          # lib/ is loaded by both processes: no UI toolkits, no Shell UI.
+          if grep -nE "from 'gi://(St|Clutter|Meta|Shell|Gtk|Gdk|Adw)'|resource:///org/gnome/shell/ui" "$UUID"/lib/*.js; then
+            echo "ERROR: shared shell/prefs modules must not import UI toolkits"
             exit 1
           fi
 
           # Synchronous file IO is flagged in shell-process code (EGO-X-004).
           # prefs.js runs in its own process and is exempt.
-          if grep -nE "\.load_contents\(|file_get_contents\(" "$UUID/extension.js" "$UUID"/lib/*.js; then
+          if grep -nE "\.load_contents\(|file_get_contents\(" "$UUID/extension.js" "$UUID"/shell/*.js "$UUID"/lib/*.js; then
             echo "ERROR: synchronous file IO in shell code (use load_contents_async)"
             exit 1
           fi
@@ -141,9 +147,12 @@ jobs:
           fi
           echo "== shexli report =="
           shexli "$ZIP" || true
-          # Fail only on error-severity findings.
+          # Fail only on error-severity findings. EGO-M-004 is excluded: shexli
+          # 0.2.1 (the latest) predates GNOME 51, released 2026-09-16, and
+          # flags it as a future version. The shell-version list is checked
+          # by hand against release.gnome.org instead.
           ERRORS=$(shexli --format json "$ZIP" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['summary']['severity_counts'].get('error',0))")
+            | python3 -c "import sys,json; print(sum(1 for f in json.load(sys.stdin)['findings'] if f['severity'] == 'error' and f['rule_id'] != 'EGO-M-004'))")
           echo "shexli error-severity findings: $ERRORS"
           if [ "$ERRORS" -gt 0 ]; then
             echo "ERROR: shexli reported $ERRORS error-severity finding(s)"
