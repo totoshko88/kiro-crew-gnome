@@ -106,8 +106,8 @@ The icon color is the single most important thing. It's the *worst* thing happen
 |-------|-------|---------------|------------|
 | ⚪ grey | idle | Gateway is up, nothing is running | Nothing |
 | 🟣 purple | busy | At least one agent is working | Wait, or peek |
-| 🟡 amber | attention | An agent is blocked on you: it asked a question or wants a tool approval (reply suggestions after a finished turn don't count) | Click — it needs you |
-| 🔴 red | problem | A critical alert, an MCP error, or the gateway is unreachable | Click / investigate |
+| 🟡 amber | attention | A session is blocked on you: an agent asked a question or wants a tool approval, or an MCP server waits for you to sign in (the menu row says *MCP sign-in needed*). Reply suggestions after a finished turn don't count | Click — it needs you |
+| 🔴 red | problem | A critical alert, an MCP server that failed to start in a session, or the gateway is unreachable | Click / investigate |
 | 🔴 dim red | auth | Your token expired | Reopen the dashboard, refetch a token |
 | 💤 faded, eyes closed | stopped | You stopped the gateway (or it is stopping / starting) | Menu → **Start gateway** when you need it |
 
@@ -160,6 +160,22 @@ Right-click (secondary button) opens the menu:
     again; the ghost notices on its own.
   - If sessions are still working, you are asked to confirm first, because
     stopping interrupts them.
+- **Check for updates** turns into **Update to _x.y.z_** when a release is
+  out. What it does depends on how Kiro Crew is installed:
+  - A git checkout: the gateway updates itself and restarts.
+  - A `cli.sh` or pipx install (the usual one): the gateway can't replace
+    itself while it runs, so the item reads **Update to _x.y.z_…** and opens
+    a dialog with the gateway's own update command (the installer, on your
+    release channel). **Copy command** puts it on the clipboard; paste it into
+    a terminal, and when it finishes pick **Restart gateway**. The extension
+    never runs the installer itself.
+  - A container or the desktop app: you're pointed at the dashboard's
+    *Settings → About*, which owns that update.
+
+  The item follows the gateway on its own: it changes when a release appears,
+  shows the step while an update runs (*Updating: building…*), and reads
+  **Update required: _x.y.z_** when the gateway demands a minimum version —
+  you also get one notification about that.
 - **Reconnect** — force the live connection to reconnect now (useful after a
   network blip). Hidden while the gateway is stopped.
 - **Settings** — opens the preferences window.
@@ -330,7 +346,7 @@ gnome-extensions info kiro-crew@totoshko88.github.io
 
 **Ghost is dim red.** Token expired. It should refetch automatically; if not, open **Settings** → **Fetch**, or **Open** the dashboard and paste a token.
 
-**Ghost is bright red but the gateway is fine.** That's a *crew* signal: a critical notification or an agent error. Click the ghost to jump to it, or open the dashboard.
+**Ghost is bright red but the gateway is fine.** That's a *crew* signal: a critical notification (it also pops up on the desktop; click it to open the page it points to and mark it read in the dashboard's bell), or an MCP server that failed to start in a session. Click the ghost to jump to that session, or open the dashboard. A tool approval is critical on the gateway too, but it shows as amber, not red.
 
 **"Stop gateway" asks for a password.** That's polkit guarding the system
 service: stopping a system unit is an admin action. Cancel and nothing

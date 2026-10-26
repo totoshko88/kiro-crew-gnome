@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4]
+
+Catches up with Kiro Crew gateway 0.11.
+
+### Fixed
+
+- **Update did nothing useful on a `cli.sh` or pipx install** (the usual one). The gateway can't replace itself while it runs, so it answers the update check with the command that updates that install (the installer, on your release channel); the extension ignored it, showed "Re-run the installer to upgrade." and opened the dashboard home. **Update to _x.y.z_…** now opens a dialog with that command and a **Copy command** button; paste it into a terminal, then pick **Restart gateway**. The extension still never runs the installer. An install with no such command (a container, the desktop app) opens the dashboard's *Settings → About* instead of the home page.
+- **Critical notifications never reached the desktop.** The gateway sends a note inside the WebSocket frame's `data`, and the extension read the frame itself, so it never saw a critical one. They now pop up again, and a click opens the dashboard page the note links to. Notes the gateway silenced (a muted session) are skipped. A tool approval is critical on the gateway too; it pops up but leaves the ghost amber, not red.
+- **A failed MCP server never turned the session red.** The gateway reports failed servers as a `failed` list in `mcp_report`; the extension looked for `status` / `severity` fields the gateway doesn't send.
+- Background subagents that are queued but not yet running (`subagents_queued`), and a compaction holding a session, count as working. The check for an `orchestrating` field the gateway doesn't send is gone.
+- Opening a link with a browser chosen in Settings logged a `Gio.DesktopAppInfo has been moved` warning on GNOME 49+ (GLib 2.86). The extension now finds the browser through the shell's app system and launches with a shell launch context.
+
+### Security
+
+- The local secret (`~/.kiro/crew/.local_secret`) travels over the gateway's owner-only unix socket (`~/.kiro/crew/dashboard-<port>.sock`) for the token bootstrap and a hand-run Stop, following the gateway's own CLI, which since 0.11 proves the gateway before it sends the secret. Before, it went to `localhost:<port>`, so another local user listening on that port (or on `::1`) while the gateway was down could receive it. A gateway without the socket is reached on `127.0.0.1`. The shell and the preferences window share this code now (`lib/localBootstrap.js`).
+- Clipboard use is declared in the extension description: the extension only writes the update command, on **Copy command**, and never reads the clipboard.
+
+### Added
+
+- **Update state follows the gateway live.** The gateway pushes its update verdict in the status frame it sends over the WebSocket every few seconds, and the extension reads it from there: the update item changes on its own when a release appears, with no update-check request when the menu opens or the gateway reconnects. **Check for updates** still asks the gateway right away. A gateway too old to send these fields is checked once, as before.
+- **Update required.** When the gateway reports that a minimum version is required (a security-policy pin or a breaking-change floor), the item reads **Update required: _x.y.z_** and one notification says so; clicking it starts the update.
+- **Update progress.** While a git checkout updates itself, the item shows the gateway's step (downloading, building, installing, restarting), and a failed update is reported with the gateway's own error.
+- **MCP sign-in.** A session whose MCP server waits for you to sign in turns amber, and its menu row says *MCP sign-in needed*. A failed MCP server still turns it red.
+- **Clicked notifications are marked read** in the dashboard's notification bell (`POST /api/notifications/ack`), for a local profile or one with SSH control.
+
+### Changed
+
+- `metadata.json` no longer carries the integer `version`: the review guidelines mark it deprecated, set by extensions.gnome.org on upload. The release workflow no longer bumps it.
+
 ## [0.1.3]
 
 ### Added

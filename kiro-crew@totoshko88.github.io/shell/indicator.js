@@ -7,6 +7,7 @@ import St from 'gi://St';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
+import Shell from 'gi://Shell';
 
 import {gettext as _, ngettext} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -25,6 +26,9 @@ import {
 
 // Opacity of the panel icon while the gateway is stopped on purpose (0-255).
 const STOPPED_OPACITY = 115;
+
+// The notification channel of tool approval requests.
+const APPROVAL_CHANNEL = 'system.approval';
 
 function stateLabel(state) {
     switch (state) {
@@ -65,7 +69,9 @@ export class Indicator {
         this._confirmation = new Confirmation();
         this._connection = new GatewayConnection(this._settings, {
             onSlots: slots => this._onSlots(slots),
-            onNotification: frame => this._onNotification(frame),
+            onNotification: note => this._onNotification(note),
+            onStatus: status => this._updates.onStatus(status),
+            onUpdateProgress: progress => this._updates.onProgress(progress),
             onOnline: online => this._onOnline(online),
             onAuthError: () => this._recompute(),
             onTunnelState: (state, error) => this._onTunnelState(state, error)
@@ -73,7 +79,8 @@ export class Indicator {
         this._lifecycle = new GatewayLifecycle(this._connection, this._notifier, () => this._recompute());
         this._updates = new UpdateManager(this._connection, this._settings, this._notifier, {
             onChanged: () => this._updateControls(),
-            openDashboard: () => this._openUrl(this._connection.pageUrl('/'))
+            openPage: path => this._openUrl(this._connection.pageUrl(path)),
+            confirm: (dialog, onConfirm) => this._confirmation.ask(dialog, onConfirm)
         });
         this._menu = new IndicatorMenu(this.button.menu, {
             openDashboard: () => this._openUrl(this._connection.pageUrl('/')),
@@ -87,7 +94,6 @@ export class Indicator {
             opened: () => {
                 this._refreshSessions();
                 this._lifecycle.refresh();
-                this._updates.refresh();
             }
         });
         this._menu.setProfiles(this._connection.profiles(), this._connection.profile.id);
@@ -149,10 +155,6 @@ export class Indicator {
         this._recompute();
         if (this._menu.isOpen)
             this._refreshSessions();
-        // The first live frame means the token works: read the update state
-        // so the channel setting mirrors the gateway without opening the menu.
-        if (!this._updates.known)
-            this._updates.refresh();
     }
 
     _onOnline(online) {
@@ -161,19 +163,43 @@ export class Indicator {
             this._slots = [];
         this._recompute();
         this._renderSessions([]);
-        if (online) {
+        if (online)
             this._refreshSessions();
-            this._updates.refresh();
-        }
         this._lifecycle.refresh();
     }
 
-    _onNotification(frame) {
-        if (String(frame.priority ?? '').toLowerCase() !== 'critical')
+    /**
+     * A note from the gateway's notification bus. Only critical ones reach
+     * the desktop, and a click opens the dashboard page the note links to.
+     * A tool approval is critical too, but it already shows as amber on its
+     * session, so it does not turn the ghost red.
+     */
+    _onNotification(note) {
+        if (note.priority !== 'critical' || note.silenced)
             return;
-        this._criticalNotice = true;
-        this._recompute();
-        this._notifier.notify(frame.title || 'Kiro Crew', frame.body || '');
+        if (note.channel !== APPROVAL_CHANNEL) {
+            this._criticalNotice = true;
+            this._recompute();
+        }
+        const path = typeof note.url === 'string' && note.url.startsWith('/') ? note.url : '/';
+        const profileId = this._connection.profile.id;
+        this._notifier.notify(note.title || 'Kiro Crew', note.body || '', () => {
+            this._openUrl(this._connection.pageUrl(path));
+            this._ackNotification(note.ts, profileId);
+        });
+    }
+
+    /**
+     * Mark a clicked note read in the dashboard's bell too. Only on the
+     * gateway that sent it, and not on a read-only remote one, which the
+     * extension never changes.
+     */
+    _ackNotification(ts, profileId) {
+        if (typeof ts !== 'string' || !ts || !this._connection.canControl ||
+            this._connection.profile.id !== profileId)
+            return;
+        this._connection.client.ackNotification(ts)
+            .catch(e => logUnlessCancelled(e, 'marking a notification read failed'));
     }
 
     _recompute() {
@@ -333,12 +359,15 @@ export class Indicator {
 
     _openUrl(url) {
         const browser = this._settings.get_string('browser');
+        // The shell's app lookup, not Gio.DesktopAppInfo, which GLib 2.86
+        // moved to GioUnix (it warns on every access there).
+        const app = browser ? Shell.AppSystem.get_default().lookup_app(browser) : null;
+        const context = global.create_app_launch_context(0, -1);
         try {
-            const app = browser ? Gio.DesktopAppInfo.new(browser) : null;
             if (app)
-                app.launch_uris([url], null);
+                app.get_app_info().launch_uris([url], context);
             else
-                Gio.AppInfo.launch_default_for_uri(url, null);
+                Gio.AppInfo.launch_default_for_uri(url, context);
         } catch (e) {
             logError(e, 'kiro-crew: failed to open URL');
         }

@@ -3,8 +3,9 @@
  * JavaScript, covered by tests/test-state.js.
  *
  * States, highest priority first: stopped (on purpose), auth (token
- * rejected), offline, error (critical notice or failed MCP report),
- * attention (an agent waits for a question or an approval), busy, idle.
+ * rejected), offline, error (critical notice or an MCP server that failed),
+ * attention (a question, an approval, or an MCP sign-in waits on you), busy,
+ * idle.
  */
 
 export const STATE = Object.freeze({
@@ -47,30 +48,41 @@ export const STYLE_CLASS = Object.freeze({
     idle: 'kiro-crew-icon kiro-crew-idle'
 });
 
-/** Does this slot's mcp_report describe a failure? Defensive — shape varies. */
+function nonEmptyList(value) {
+    return Array.isArray(value) && value.length > 0;
+}
+
+/** Did an MCP server of this session fail to start? `failed` lists their names. */
 function reportHasError(report) {
-    if (!report || typeof report !== 'object')
-        return false;
-    const status = String(report.status ?? report.state ?? '').toLowerCase();
-    if (status === 'error' || status === 'failed' || status === 'failure')
-        return true;
-    const sev = String(report.severity ?? report.level ?? '').toLowerCase();
-    return sev === 'error' || sev === 'critical';
+    return nonEmptyList(report?.failed);
+}
+
+/** Does an MCP server of this session wait for you to sign in? */
+function reportAwaitsAuth(report) {
+    return nonEmptyList(report?.awaiting_auth);
+}
+
+/** Why a slot waits on you, when the menu should say so: 'mcp-auth' or null. */
+export function slotHint(slot) {
+    if (!slot || reportHasError(slot.mcp_report) || slot.pending_approval || slot.needs_input)
+        return null;
+    return reportAwaitsAuth(slot.mcp_report) ? 'mcp-auth' : null;
 }
 
 /**
- * Is this slot working? Like the dashboard sidebar: its own turn, a staged
- * plan, background subagents, or queued prompts — `running` alone is only the
- * main agent's turn.
+ * Is this slot working? Its own turn, background subagents running or queued,
+ * queued prompts, or a compaction holding the session — `running` alone is
+ * only the main agent's turn.
  */
 function slotIsWorking(slot) {
-    return Boolean(slot.running || slot.orchestrating || slot.subagents_running ||
-        (Number(slot.queue_depth) || 0) > 0);
+    return Boolean(slot.running || slot.subagents_running || slot.compacting ||
+        (Number(slot.subagents_queued) || 0) > 0 || (Number(slot.queue_depth) || 0) > 0);
 }
 
 /**
  * One slot's own state. The menu dots and the ghost share this rule, so the
- * ghost is always the worst dot. Attention means an agent is blocked on you;
+ * ghost is always the worst dot. Attention means the session is blocked on
+ * you: a question, a tool approval, or an MCP server waiting for your sign-in.
  * `has_options` (quick-reply chips left on finished turns) and `interrupted`
  * don't count.
  */
@@ -79,7 +91,7 @@ export function slotState(slot) {
         return STATE.IDLE;
     if (reportHasError(slot.mcp_report))
         return STATE.ERROR;
-    if (slot.pending_approval || slot.needs_input)
+    if (slot.pending_approval || slot.needs_input || reportAwaitsAuth(slot.mcp_report))
         return STATE.ATTENTION;
     if (slotIsWorking(slot))
         return STATE.BUSY;
@@ -191,7 +203,8 @@ export function activeSessionCount(slots = []) {
  * Menu rows from the recent sessions and the live slots. A busy live slot
  * missing from the recent list is pinned on top, so the ghost's state always
  * matches a visible dot.
- * @returns {Array<{key: string, title: string, state: string}>}
+ * @returns {Array<{key: string, title: string, state: string, hint: ?string}>}
+ *   hint: see slotHint()
  */
 export function menuRows(sessions = [], slots = []) {
     const liveByKey = new Map(slots.map(s => [slotName(s.key), s]));
@@ -199,7 +212,7 @@ export function menuRows(sessions = [], slots = []) {
     const pinned = slots
         .filter(s => !listed.has(slotName(s.key)) && slotState(s) !== STATE.IDLE)
         .sort((a, b) => slotRecency(b) - slotRecency(a))
-        .map(s => ({key: s.key, title: s.title || slotName(s.key), state: slotState(s)}));
+        .map(s => ({key: s.key, title: s.title || slotName(s.key), state: slotState(s), hint: slotHint(s)}));
     const recent = sessions.map(sess => {
         const live = liveByKey.get(slotName(sess.key));
         return {
@@ -207,7 +220,8 @@ export function menuRows(sessions = [], slots = []) {
             // The live title is current (renames land there first), and
             // /api/sessions echoes the raw storage key for an untitled chat.
             title: live?.title || sess.title || slotName(sess.key),
-            state: live ? slotState(live) : STATE.IDLE
+            state: live ? slotState(live) : STATE.IDLE,
+            hint: live ? slotHint(live) : null
         };
     });
     return [...pinned, ...recent];

@@ -61,6 +61,11 @@
     color: rgba(255, 255, 255, 0.55);
 }
 
+/* The reason beside a session's dot (e.g. "MCP sign-in needed"). */
+.kiro-crew-row-hint {
+    margin-left: 12px;
+}
+
 .kiro-crew-header {
     font-weight: bold;
 }

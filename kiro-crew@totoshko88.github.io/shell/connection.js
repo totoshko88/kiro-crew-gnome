@@ -5,6 +5,7 @@
 
 import {GatewayClient} from './client.js';
 import {SshTunnel} from './tunnel.js';
+import {LocalBootstrap} from '../lib/localBootstrap.js';
 import {RemoteControl} from '../lib/remote.js';
 import {logUnlessCancelled} from '../lib/cancel.js';
 import {KIND, profileBaseUrl, usesTunnel, usesSshControl, reservedPorts} from '../lib/profiles.js';
@@ -19,8 +20,9 @@ function connectionKey(p) {
 export class GatewayConnection {
     /**
      * @param {Gio.Settings} settings
-     * @param {object} handlers onSlots, onNotification, onOnline, onAuthError,
-     *   onTunnelState — forwarded from the client and the tunnel
+     * @param {object} handlers onSlots, onNotification, onStatus,
+     *   onUpdateProgress, onOnline, onAuthError, onTunnelState — forwarded
+     *   from the client and the tunnel
      */
     constructor(settings, handlers) {
         this._settings = settings;
@@ -29,6 +31,7 @@ export class GatewayConnection {
         this._profile = readActiveProfile(settings);
         this._key = connectionKey(this._profile);
         this._mintingToken = false;
+        this._bootstrap = new LocalBootstrap();
         this._remote = new RemoteControl();
         this._tunnel = new SshTunnel((state, error) => this._onTunnelState(state, error));
         this._client = new GatewayClient(() => ({endpoint: this.baseUrl, token: this._profile.token}));
@@ -37,7 +40,9 @@ export class GatewayConnection {
     start() {
         this._client.start({
             onSlots: slots => this._handlers.onSlots(slots),
-            onNotification: frame => this._handlers.onNotification(frame),
+            onNotification: note => this._handlers.onNotification(note),
+            onStatus: status => this._handlers.onStatus(status),
+            onUpdateProgress: progress => this._handlers.onUpdateProgress(progress),
             onOnline: online => this._handlers.onOnline(online),
             onAuthError: bad => {
                 this._handlers.onAuthError(bad);
@@ -147,7 +152,7 @@ export class GatewayConnection {
         const id = this._profile.id;
         this._mintingToken = true;
         const mint = this.isLocal
-            ? this._client.fetchLocalToken()
+            ? this._bootstrap.fetchToken(this._profile.port)
             : this._remote.fetchToken(this._profile);
         // Storing the token rewrites the profile; reload() then reconnects.
         mint.then(token => {
@@ -158,6 +163,11 @@ export class GatewayConnection {
             this._mintingToken = false;
             logUnlessCancelled(e, 'token fetch failed');
         });
+    }
+
+    /** Shut down a hand-run gateway on this computer through its local bootstrap. */
+    shutdownLocal() {
+        return this._bootstrap.shutdown(this._profile.port);
     }
 
     _openTunnel() {
@@ -182,6 +192,7 @@ export class GatewayConnection {
         if (this._settings.get_int('tunnel-port') !== 0)
             this._settings.set_int('tunnel-port', 0);
         this._remote.destroy();
+        this._bootstrap.destroy();
         this._client.destroy();
     }
 }

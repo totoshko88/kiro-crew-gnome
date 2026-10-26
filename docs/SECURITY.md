@@ -22,14 +22,23 @@ This extension implements several security measures:
     asks for an administrator password; the extension holds no privilege of
     its own and runs no subprocess or `sudo`.
   - **Stop gateway** for a hand-run gateway calls `POST /api/shutdown`, which
-    the gateway accepts only from loopback with the per-user local secret.
+    the gateway accepts only with the per-user local secret (see below for
+    how the secret is sent).
   - **Restart gateway** calls the gateway's own in-place restart
     (`POST /api/restart`) with the dashboard token.
   - **Update** asks the gateway to apply an update it manages
-    (`POST /api/update`); for an install the gateway does not manage, the
-    extension runs no installer and instead opens the dashboard.
+    (`POST /api/update`). For an install the gateway can't update in place
+    (a `cli.sh` or pipx install), the extension runs no installer: it shows
+    the command the gateway names for that install
+    (`remediation.command` of `GET /api/update/check`) in a dialog, and
+    writes it to the clipboard only when you press **Copy command**. You run
+    it in your own terminal. Without such a command it opens the dashboard's
+    About page. The clipboard is never read.
   - **Release channel** switch calls `POST /api/update/channel` with the
     dashboard token.
+  - **Clicking a desktop notification** marks that one note read
+    (`POST /api/notifications/ack` with its `ts`), on the gateway that sent
+    it. Nothing else about the note changes.
   - Every one is offered only for a local profile, and none runs a
     subprocess. "Local" is the profile's kind, not its URL: an SSH tunnel also
     listens on `localhost`, so a URL check would aim these actions at the wrong
@@ -66,9 +75,17 @@ This extension implements several security measures:
 - **Service control is tied to the port**: Stop/Start drive `kirocrew.service`
   (local over D-Bus, remote over SSH) only when the unit listens on the
   profile's port, so a profile for one gateway can never stop another.
-- **Never mints credentials**: Token creation is a security-gated surface on the
-  gateway; the extension cannot and does not create tokens. You paste an existing
-  token into Settings.
+- **Tokens come only from the local bootstrap or a paste**: the extension
+  never uses the gateway's security-gated token creation. For a local profile
+  it calls `GET /api/token/local` with the local secret; you can also paste a
+  token in Settings.
+- **The local secret reaches only this user's gateway**: requests carrying
+  `~/.kiro/crew/.local_secret` (the token bootstrap and the hand-run Stop) go
+  to the gateway's unix socket `~/.kiro/crew/dashboard-<port>.sock`. Only a
+  process of this user can create it in that `0700` directory, so another
+  local user listening on the gateway's port while it is down never receives
+  the secret. A gateway too old to have the socket is reached on
+  `127.0.0.1`, never `localhost`, which may resolve to `::1`.
 - **Tokens stored in GSettings, never logged**: Access tokens are kept in the
   extension's GSettings and are never written to the journal or any log. Each
   gateway issues its own token, so each profile stores its own (the `profiles`
