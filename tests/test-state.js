@@ -8,7 +8,7 @@ const here = GLib.path_get_dirname(
 const stateUrl = `file://${here}/../kiro-crew@totoshko88.github.io/lib/state.js`;
 
 const {
-    STATE, aggregateState, slotState, targetSlotKey, slotName,
+    STATE, aggregateState, slotState, slotHint, targetSlotKey, slotName,
     slotRecency, activeSessionCount, menuRows
 } = await import(stateUrl);
 
@@ -27,20 +27,45 @@ eq(aggregateState({online: true, slots: []}), STATE.IDLE, 'idle empty');
 eq(aggregateState({online: true, slots: [{running: true}]}), STATE.BUSY, 'busy');
 eq(aggregateState({online: true, slots: [{running: true}, {needs_input: true}]}), STATE.ATTENTION, 'attention over busy');
 eq(aggregateState({online: true, slots: [{pending_approval: true}]}), STATE.ATTENTION, 'approval attention');
-eq(aggregateState({online: true, slots: [{needs_input: true}, {mcp_report: {status: 'error'}}]}), STATE.ERROR, 'mcp error top');
+// The gateway's mcp_report: server names in `failed`, details in `failures`.
+const failedMcp = {configured: ['a', 'b'], ready: ['a'], failed: ['b'], failures: {b: 'exited'}};
+const healthyMcp = {configured: ['a'], ready: ['a'], failed: [], failures: {}, awaiting_auth: []};
+eq(aggregateState({online: true, slots: [{needs_input: true}, {mcp_report: failedMcp}]}), STATE.ERROR, 'mcp error top');
 eq(aggregateState({online: true, slots: [{running: true}], criticalNotice: true}), STATE.ERROR, 'critical notice error');
 eq(aggregateState({online: false, slots: [], authError: true}), STATE.AUTH, 'authError beats offline');
 eq(aggregateState({online: true, slots: [{running: true}], authError: true}), STATE.AUTH, 'authError beats busy');
-eq(aggregateState({online: true, slots: [{mcp_report: {status: 'error'}}], authError: true}), STATE.AUTH, 'authError beats mcp error');
+eq(aggregateState({online: true, slots: [{mcp_report: failedMcp}], authError: true}), STATE.AUTH, 'authError beats mcp error');
 eq(slotState({running: true}), STATE.BUSY, 'slotState busy');
-eq(slotState({mcp_report: {severity: 'critical'}}), STATE.ERROR, 'slotState mcp severity');
+eq(slotState({mcp_report: failedMcp}), STATE.ERROR, 'slotState failed mcp server');
+eq(slotState({mcp_report: healthyMcp}), STATE.IDLE, 'slotState healthy mcp report is idle');
+eq(slotState({mcp_report: null}), STATE.IDLE, 'slotState null mcp report is idle');
 
 // Multi-session: a session whose main turn ended but whose subagents still
 // run is working (the 0.1.1 bug showed only the session with running:true).
 eq(slotState({running: false, subagents_running: true}), STATE.BUSY, 'subagents_running is busy');
-eq(slotState({orchestrating: true}), STATE.BUSY, 'orchestrating is busy');
+eq(slotState({subagents_queued: 1}), STATE.BUSY, 'queued subagents is busy');
+eq(slotState({subagents_queued: 0}), STATE.IDLE, 'no queued subagents is idle');
+eq(slotState({compacting: true}), STATE.BUSY, 'compaction is busy');
 eq(slotState({queue_depth: 2}), STATE.BUSY, 'queued prompts is busy');
 eq(slotState({queue_depth: 0}), STATE.IDLE, 'empty queue is idle');
+// waiting_for_input means the turn ended and the chat awaits your next message.
+eq(slotState({waiting_for_input: true}), STATE.IDLE, 'waiting_for_input alone is idle');
+
+// An MCP server waiting for sign-in blocks the session on you: amber, with a hint.
+const authMcp = {configured: ['gh'], ready: [], failed: [], awaiting_auth: ['gh']};
+eq(slotState({mcp_report: authMcp}), STATE.ATTENTION, 'mcp awaiting_auth is attention');
+eq(slotState({mcp_report: authMcp, running: true}), STATE.ATTENTION, 'mcp sign-in beats busy');
+eq(slotState({mcp_report: {...authMcp, failed: ['x']}}), STATE.ERROR, 'failed mcp beats sign-in');
+eq(slotHint({mcp_report: authMcp}), 'mcp-auth', 'slotHint mcp-auth');
+eq(slotHint({mcp_report: authMcp, needs_input: true}), null, 'question has no sign-in hint');
+eq(slotHint({mcp_report: healthyMcp}), null, 'healthy report has no hint');
+eq(slotHint({}), null, 'no report has no hint');
+{
+    const rows = menuRows([{key: 'dashboard_chat-1-1', title: 'A'}],
+        [{key: 'chat-1-1', mcp_report: authMcp}, {key: 'chat-2-1', title: 'B', mcp_report: authMcp}]);
+    eq(rows.map(r => r.hint).join(','), 'mcp-auth,mcp-auth', 'menuRows carries the hint (pinned + recent)');
+    eq(menuRows([{key: 'dashboard_chat-9-1', title: 'Gone'}], [])[0].hint, null, 'menuRows: no live slot, no hint');
+}
 // has_options = quick-reply suggestion chips after a finished turn: not a block.
 eq(slotState({has_options: true, running: false}), STATE.IDLE, 'has_options alone is idle');
 eq(slotState({has_options: true, running: true}), STATE.BUSY, 'has_options + running is busy');

@@ -197,7 +197,7 @@ export class GatewayLifecycle {
                 await this._service.stop();
             else if (mode === 'ssh')
                 await conn.remote.runChecked(conn.profile, 'stop');
-            else if (await conn.client.shutdownLocal())
+            else if (await conn.shutdownLocal())
                 this._manualStopped = true;
             else
                 throw new Error(_('The gateway did not accept the shutdown request.'));

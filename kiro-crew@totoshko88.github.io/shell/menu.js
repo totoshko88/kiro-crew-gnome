@@ -13,6 +13,11 @@ const DOT_CLASS = {
     idle: 'kiro-crew-dot kiro-crew-idle'
 };
 
+// Why a session waits on you, beside its dot (see slotHint() in lib/state.js).
+const HINT_TEXT = {
+    'mcp-auth': () => _('MCP sign-in needed')
+};
+
 function addItem(menu, label, onActivate) {
     const item = new PopupMenu.PopupMenuItem(label);
     item.connect('activate', onActivate);
@@ -119,17 +124,29 @@ export class IndicatorMenu {
         }
     }
 
-    /** @param {Array<{key, title, state}>} rows see menuRows() */
+    /** @param {Array<{key, title, state, hint}>} rows see menuRows() */
     showSessions(rows, noWrap, onActivate) {
         this._sessions.removeAll();
         for (const row of rows) {
             const item = new PopupMenu.PopupMenuItem(row.title || _('(untitled)'));
+            // Whichever comes first after the title takes the free space, so
+            // the hint and the dot both sit at the right edge.
+            const hint = HINT_TEXT[row.hint];
+            if (hint) {
+                item.add_child(new St.Label({
+                    text: hint(),
+                    style_class: 'kiro-crew-hint kiro-crew-row-hint',
+                    x_align: Clutter.ActorAlign.END,
+                    x_expand: true,
+                    y_align: Clutter.ActorAlign.CENTER
+                }));
+            }
             item.add_child(new St.Icon({
                 icon_name: 'media-record-symbolic',
                 style_class: DOT_CLASS[row.state] ?? DOT_CLASS.idle,
                 icon_size: 10,
                 x_align: Clutter.ActorAlign.END,
-                x_expand: true
+                x_expand: !hint
             }));
             if (noWrap)
                 item.label.clutter_text.set_line_wrap(false);

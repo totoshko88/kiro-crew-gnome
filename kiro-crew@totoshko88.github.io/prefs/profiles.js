@@ -4,19 +4,17 @@ import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import Soup from 'gi://Soup';
 
 import {gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {isCancelled} from '../lib/cancel.js';
+import {LocalBootstrap} from '../lib/localBootstrap.js';
 import {
     KIND, DEFAULT_PORT, normalizeProfile, profileError, profileBaseUrl, profileSummary,
     usesTunnel, usesSshControl, isLoopbackHost
 } from '../lib/profiles.js';
 import {readProfiles, writeProfiles, readActiveProfile, migrateLegacyProfiles} from '../lib/profileStore.js';
 import {RemoteControl} from '../lib/remote.js';
-
-const DECODER = new TextDecoder('utf-8');
 
 const ERROR_TEXT = {
     name: () => _('Give the profile a name.'),
@@ -42,9 +40,8 @@ export class ProfilesGroup {
         this._rows = [];
         this._draft = null;
         this._layout = '';
-        this._cancellable = new Gio.Cancellable();
+        this._bootstrap = new LocalBootstrap();
         this._remote = new RemoteControl();
-        this._session = new Soup.Session({timeout: 10});
         migrateLegacyProfiles(settings);
 
         this.group = new Adw.PreferencesGroup({
@@ -78,8 +75,7 @@ export class ProfilesGroup {
         });
         window.connect('close-request', () => {
             settings.disconnect(this._changedId);
-            this._cancellable.cancel();
-            this._session.abort();
+            this._bootstrap.destroy();
             this._remote.destroy();
             return false;
         });
@@ -298,7 +294,7 @@ export class ProfilesGroup {
     _fetchToken(profile, button, tokenField) {
         button.sensitive = false;
         const mint = profile.kind === KIND.LOCAL
-            ? this._fetchLocalToken(profileBaseUrl(profile))
+            ? this._bootstrap.fetchToken(profile.port)
             : this._remote.fetchToken(profile);
         mint.then(token => {
             button.sensitive = true;
@@ -317,47 +313,6 @@ export class ProfilesGroup {
             button.sensitive = true;
             logError(e, 'kiro-crew: token fetch failed');
         });
-    }
-
-    /** The loopback-only local bootstrap of the gateway on this computer. */
-    async _fetchLocalToken(baseUrl) {
-        const secret = await new Promise((resolve, reject) => {
-            const file = Gio.File.new_for_path(
-                GLib.build_filenamev([GLib.get_home_dir(), '.kiro', 'crew', '.local_secret']));
-            file.load_contents_async(this._cancellable, (f, res) => {
-                try {
-                    resolve(DECODER.decode(f.load_contents_finish(res)[1]).trim());
-                } catch (e) {
-                    if (isCancelled(e))
-                        reject(e);
-                    else
-                        resolve('');
-                }
-            });
-        });
-        if (!secret)
-            return '';
-        const message = Soup.Message.new('GET', `${baseUrl}/api/token/local`);
-        message.get_request_headers().append('X-Local-Secret', secret);
-        const text = await new Promise((resolve, reject) => {
-            this._session.send_and_read_async(message, GLib.PRIORITY_DEFAULT, this._cancellable, (s, res) => {
-                try {
-                    const bytes = s.send_and_read_finish(res);
-                    resolve(message.get_status() === Soup.Status.OK ? DECODER.decode(bytes.get_data()) : '');
-                } catch (e) {
-                    if (isCancelled(e))
-                        reject(e);
-                    else
-                        resolve('');
-                }
-            });
-        });
-        try {
-            const data = JSON.parse(text);
-            return typeof data.token === 'string' ? data.token : '';
-        } catch {
-            return '';
-        }
     }
 
     _save(profile, entry, draft) {

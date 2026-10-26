@@ -4,7 +4,7 @@
 
 # Kiro Crew — command your crew from the GNOME top bar 👻
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--51-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.3-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml) [![Get it on GNOME Extensions](https://img.shields.io/badge/GNOME%20Extensions-Install-4A86CF?logo=gnome)](https://extensions.gnome.org/extension/11123/kiro-crew/)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0) [![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45--51-blue.svg)](https://www.gnome.org/) [![Version](https://img.shields.io/badge/version-0.1.4-green.svg)](CHANGELOG.md) [![CI](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml/badge.svg)](https://github.com/totoshko88/kiro-crew-gnome/actions/workflows/ci.yml) [![Get it on GNOME Extensions](https://img.shields.io/badge/GNOME%20Extensions-Install-4A86CF?logo=gnome)](https://extensions.gnome.org/extension/11123/kiro-crew/)
 
 **Your AI crew is working right now — do you know what it's doing?**
 
@@ -111,8 +111,10 @@ That's it. On a normal local setup the extension **fetches its own access token*
 
 - **Live state** — a WebSocket to `GET /api/ws`, frame `type:"slots"`. Each
   slot is reduced to one state with the dashboard sidebar's rules (working =
-  own turn, staged plan, background subagents or queued prompts; waiting =
-  a question or a tool approval; plus `mcp_report` errors), then all slots are
+  own turn, background subagents running or queued, queued prompts or a
+  compaction; waiting = a question, a tool approval or an MCP sign-in in
+  `mcp_report.awaiting_auth`; error = MCP servers in `mcp_report.failed`),
+  then all slots are
   folded into one indicator state (`lib/state.js`).
 - **Gateway profiles** — one profile per gateway, each with its own token. A
   **local** profile is the gateway on this computer and gets the full menu. A

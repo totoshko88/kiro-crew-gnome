@@ -40,8 +40,9 @@ export class GatewayClient {
     }
 
     /**
-     * @param {object} callbacks onSlots(slots), onNotification(frame),
-     *   onOnline(bool), onAuthError(bool)
+     * @param {object} callbacks onSlots(slots), onNotification(note),
+     *   onStatus(status) (the periodic "dashboard" frame),
+     *   onUpdateProgress({step, detail}), onOnline(bool), onAuthError(bool)
      */
     start(callbacks) {
         this._cb = callbacks;
@@ -104,37 +105,13 @@ export class GatewayClient {
         return this._json('POST', '/api/update/channel', {channel});
     }
 
+    /** Mark one notification read, by its `ts`, as the dashboard's bell does. */
+    async ackNotification(ts) {
+        return await this._json('POST', '/api/notifications/ack', {ts}) !== null;
+    }
+
     async restart() {
         return await this._json('POST', '/api/restart', {}) !== null;
-    }
-
-    /**
-     * Mint a dashboard token through the gateway's loopback-only local
-     * bootstrap. Only the gateway on this computer accepts it. Resolves to the
-     * token, or '' when the gateway refuses.
-     */
-    async fetchLocalToken() {
-        const message = await this._localSecretMessage('GET', '/api/token/local');
-        if (!message)
-            return '';
-        const {status, text} = await this._send(message);
-        if (status !== Soup.Status.OK)
-            return '';
-        try {
-            const data = JSON.parse(text);
-            return typeof data.token === 'string' ? data.token : '';
-        } catch {
-            return '';
-        }
-    }
-
-    /** Shut down a hand-run local gateway (no service manager to ask). */
-    async shutdownLocal() {
-        const message = await this._localSecretMessage('POST', '/api/shutdown');
-        if (!message)
-            return false;
-        const {status} = await this._send(message);
-        return status >= 200 && status < 300;
     }
 
     _base() {
@@ -189,34 +166,6 @@ export class GatewayClient {
         } catch {
             return null;
         }
-    }
-
-    async _localSecretMessage(method, path) {
-        const secret = await this._readLocalSecret();
-        if (!secret)
-            return null;
-        const message = Soup.Message.new(method, `${this._base()}${path}`);
-        message.get_request_headers().append('X-Local-Secret', secret);
-        return message;
-    }
-
-    /** ~/.kiro/crew/.local_secret, or '' when the gateway never wrote one. */
-    _readLocalSecret() {
-        const file = Gio.File.new_for_path(
-            GLib.build_filenamev([GLib.get_home_dir(), '.kiro', 'crew', '.local_secret']));
-        return new Promise((resolve, reject) => {
-            file.load_contents_async(this._cancellable, (f, result) => {
-                try {
-                    const [, bytes] = f.load_contents_finish(result);
-                    resolve(DECODER.decode(bytes).trim());
-                } catch (e) {
-                    if (isCancelled(e))
-                        reject(e);
-                    else
-                        resolve('');
-                }
-            });
-        });
     }
 
     // ---- WebSocket -------------------------------------------------------
@@ -296,10 +245,18 @@ export class GatewayClient {
         } catch {
             return;
         }
-        if (frame.type === 'slots')
+        if (frame.type === 'slots') {
             this._cb.onSlots(Array.isArray(frame.data) ? frame.data : []);
-        else if (frame.type === 'notification')
-            this._cb.onNotification(frame);
+            return;
+        }
+        if (!frame.data || typeof frame.data !== 'object')
+            return;
+        if (frame.type === 'notification')
+            this._cb.onNotification(frame.data);
+        else if (frame.type === 'dashboard')
+            this._cb.onStatus(frame.data);
+        else if (frame.type === 'update_progress')
+            this._cb.onUpdateProgress(frame.data);
     }
 
     _scheduleReconnect() {

@@ -6,9 +6,8 @@
 
 ```bash
 # Update CHANGELOG.md with changes for the new version.
-# NOTE: do NOT bump the EGO integer "version" in metadata.json by hand — the
-# release workflow does a conditional auto-bump on tag (keeps the committed
-# value if it is already unique vs. prior tags, otherwise increments it).
+# metadata.json carries no integer "version": the review guidelines mark it
+# deprecated, and extensions.gnome.org sets it itself on upload.
 ```
 
 ### 2. Build Package
@@ -29,9 +28,8 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The release workflow sets `version-name` from the tag, auto-bumps the EGO integer
-`version` in `metadata.json` (conditionally), runs `make pack`, and creates a
-release with notes from CHANGELOG.md.
+The release workflow sets `version-name` from the tag, runs `make pack`, and
+creates a release with notes from CHANGELOG.md.
 
 ## Manual Release (if needed)
 
@@ -61,7 +59,8 @@ release with notes from CHANGELOG.md.
 | Sync operations | Use async/await |
 | Resource leaks | Clean up in `disable()` |
 | GTK in extension.js | Move to prefs.js |
-| Missing error handling | Add try/catch |
+| try/catch or `?.` around calls that never throw | Remove them (best practices) |
+| Undeclared clipboard use | Declare it in the description |
 
 ## Version Numbering
 
@@ -71,8 +70,8 @@ Follow [Semantic Versioning](https://semver.org/):
 - **Minor** (0.X.0): New features
 - **Patch** (0.1.X): Bug fixes
 
-The EGO integer `version` is independent of the semantic `version-name` and is
-only ever incremented (monotonic) for extensions.gnome.org.
+The semantic version lives in `version-name`. extensions.gnome.org numbers each
+upload itself; `metadata.json` has no integer `version`.
 
 ## Pre-Release Checklist
 
@@ -80,4 +79,5 @@ only ever incremented (monotonic) for extensions.gnome.org.
 - [ ] EGO guidelines validated (`bash tests/validate-review-guidelines.sh`)
 - [ ] CHANGELOG.md updated
 - [ ] README.md version badge updated
-- [ ] `metadata.json` EGO `version` is left to the release workflow (conditional auto-bump)
+- [ ] `metadata.json` has no integer `version` key (set by extensions.gnome.org)
+- [ ] Any clipboard use is declared in the `metadata.json` description

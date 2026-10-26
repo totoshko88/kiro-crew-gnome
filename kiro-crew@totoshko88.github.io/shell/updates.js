@@ -1,13 +1,17 @@
 /**
  * updates.js — Check for updates, Update, and the release channel of the
- * active gateway. The gateway runs its own update check; this reads it
- * (GET /api/update/check) and acts on it.
+ * active gateway. The gateway runs its own update check and pushes the
+ * verdict in its status frame; this follows it, checks on request
+ * (GET /api/update/check), and acts on it.
  */
+
+import St from 'gi://St';
 
 import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {isCancelled, logUnlessCancelled} from '../lib/cancel.js';
 import {usesSshControl} from '../lib/profiles.js';
+import {updateInfoFromStatus, statusHasUpdateFields, activeProgress, isFailedStep} from '../lib/updateInfo.js';
 
 const CHANNELS = new Set(['stable', 'insider']);
 
@@ -15,12 +19,23 @@ function versionOf(info) {
     return info.latest_version_display || info.latest_version || '';
 }
 
+function progressLabel(step) {
+    switch (step) {
+        case 'pulling': return _('Updating: downloading…');
+        case 'syncing': return _('Updating: syncing…');
+        case 'building': return _('Updating: building…');
+        case 'installing': return _('Updating: installing…');
+        case 'restarting': return _('Updating: restarting…');
+        default: return _('Updating…');
+    }
+}
+
 export class UpdateManager {
     /**
      * @param {GatewayConnection} connection
      * @param {Gio.Settings} settings
      * @param {Notifier} notifier
-     * @param {object} hooks onChanged(), openDashboard()
+     * @param {object} hooks onChanged(), openPage(path), confirm(dialog, onConfirm)
      */
     constructor(connection, settings, notifier, hooks) {
         this._connection = connection;
@@ -28,8 +43,13 @@ export class UpdateManager {
         this._notifier = notifier;
         this._hooks = hooks;
         this._info = null;
+        // {step, detail} of an update the gateway is applying, else null.
+        this._progress = null;
         this._checking = false;
         this._applying = false;
+        // The minimum version we last told the user about, so a required
+        // update is announced once, not on every status frame.
+        this._requiredNotified = '';
         // The channel we just wrote to mirror the gateway; its 'changed'
         // echo must not be sent back to the gateway as a switch.
         this._mirroredChannel = null;
@@ -43,19 +63,87 @@ export class UpdateManager {
     menuItem(gatewayUp) {
         if (!gatewayUp || !this._connection.canControl)
             return {visible: false, label: '', sensitive: false};
+        if (this._progress)
+            return {visible: true, label: progressLabel(this._progress.step), sensitive: false};
         if (this._applying)
             return {visible: true, label: _('Updating…'), sensitive: false};
         if (this._checking && !this._info)
             return {visible: true, label: _('Checking for updates…'), sensitive: false};
-        if (this._info?.update_available) {
-            const v = versionOf(this._info);
-            return {visible: true, label: v ? _('Update to %s').replace('%s', v) : _('Update available'), sensitive: true};
+        const info = this._info;
+        if (info?.update_available) {
+            const v = versionOf(info);
+            // An ellipsis when the click opens the update-command dialog.
+            const viaTerminal = !info.can_apply && !usesSshControl(this._connection.profile);
+            let label;
+            if (!v)
+                label = info.update_required ? _('Update required') : _('Update available');
+            else if (info.update_required)
+                label = (viaTerminal ? _('Update required: %s…') : _('Update required: %s')).replace('%s', v);
+            else
+                label = (viaTerminal ? _('Update to %s…') : _('Update to %s')).replace('%s', v);
+            return {visible: true, label, sensitive: true};
         }
+        if (info?.update_required)
+            return {visible: true, label: _('Update required'), sensitive: true};
         return {visible: true, label: _('Check for updates'), sensitive: true};
     }
 
     reset() {
         this._info = null;
+        this._progress = null;
+        this._requiredNotified = '';
+    }
+
+    /**
+     * The gateway's status frame (every few seconds over the socket): follow
+     * its update verdict and progress without a request of our own. A gateway
+     * too old to send them is checked once instead.
+     */
+    onStatus(status) {
+        if (!this._connection.canControl)
+            return;
+        if (!statusHasUpdateFields(status)) {
+            if (!this.known)
+                this.refresh();
+            return;
+        }
+        const before = JSON.stringify(this.menuItem(true));
+        this._progress = activeProgress(status.update_progress);
+        const info = updateInfoFromStatus(status);
+        if (info) {
+            this._info = info;
+            this._mirrorChannel(info.channel);
+            this._announceRequired(info);
+        }
+        if (JSON.stringify(this.menuItem(true)) !== before)
+            this._hooks.onChanged();
+    }
+
+    /** A live update_progress event: show the step, report a failure once. */
+    onProgress({step, detail}) {
+        if (!this._connection.canControl)
+            return;
+        this._progress = activeProgress({step, detail});
+        if (isFailedStep(step)) {
+            this._notifier.notify(_('Could not update %s').replace('%s', this._connection.profile.name),
+                detail || _('See the gateway logs for details.'));
+        }
+        this._hooks.onChanged();
+    }
+
+    _announceRequired(info) {
+        if (!info.update_required || !info.update_available) {
+            this._requiredNotified = '';
+            return;
+        }
+        const key = info.update_min_version || versionOf(info);
+        if (key === this._requiredNotified)
+            return;
+        this._requiredNotified = key;
+        this._notifier.notify(_('Kiro Crew update required'), info.update_min_version
+            ? _('The gateway requires version %s or newer. Click to update.').replace('%s', info.update_min_version)
+            : _('The gateway requires an update. Click to update.'),
+        () => this.activate());
     }
 
     /** Re-read the gateway's update state in the background. */
@@ -120,18 +208,15 @@ export class UpdateManager {
     /**
      * Apply an update. A gateway that manages its own install applies it
      * (POST /api/update); a wheel/venv install with SSH control is updated on
-     * its host with `kirocrew update`; otherwise the dashboard, which owns
-     * that install's update flow, is opened — the extension runs no installer.
+     * its host with `kirocrew update`. Any other install is updated from a
+     * terminal (see _offerCommand) — the extension runs no installer here.
      */
     async _apply(info) {
         if (this._applying)
             return;
         const conn = this._connection;
         if (!info.can_apply && !usesSshControl(conn.profile)) {
-            const v = versionOf(info);
-            this._notifier.notify(v ? _('Update to %s available').replace('%s', v) : _('Update available'),
-                info.remediation?.message || _('Open the dashboard to update the gateway.'));
-            this._hooks.openDashboard();
+            this._offerCommand(info);
             return;
         }
         const name = conn.profile.name;
@@ -158,6 +243,34 @@ export class UpdateManager {
         this._notifier.notify(_('Updating %s').replace('%s', name),
             _('The gateway is applying the update and will restart.'));
         conn.client.reconnectNow();
+    }
+
+    /**
+     * An install the gateway cannot update in place (a cli.sh or pipx one)
+     * names the command that updates it. Show that command, and copy it to the
+     * clipboard only when the user asks; it runs in the user's own terminal.
+     * Without a command (a container, a desktop app) open the dashboard's About
+     * page, which owns that install's update flow.
+     */
+    _offerCommand(info) {
+        const v = versionOf(info);
+        const title = v ? _('Update Kiro Crew to %s').replace('%s', v) : _('Update Kiro Crew');
+        const command = info.remediation?.kind === 'command' ? String(info.remediation.command ?? '') : '';
+        if (!command) {
+            this._notifier.notify(title, info.remediation?.message || _('Open the dashboard to update the gateway.'));
+            this._hooks.openPage('/settings/about');
+            return;
+        }
+        this._hooks.confirm({
+            title,
+            description: `${_('The gateway can’t update itself while it runs. Update it by running this command in a terminal:')}\n\n${command}`,
+            actionLabel: _('Copy command')
+        }, () => {
+            St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, command);
+            this._notifier.notify(_('Update command copied'), info.requires_restart
+                ? _('Paste it into a terminal. When it finishes, choose Restart gateway in the Kiro Crew menu.')
+                : _('Paste it into a terminal to update the gateway.'));
+        });
     }
 
     async _switchChannel(channel) {

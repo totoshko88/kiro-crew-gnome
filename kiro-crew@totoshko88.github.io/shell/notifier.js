@@ -15,12 +15,19 @@ export class Notifier {
         this._sourceDestroyId = 0;
     }
 
-    notify(title, body) {
+    /** @param {?Function} onActivated called when the user clicks the notification */
+    notify(title, body, onActivated = null) {
         const source = this._ensureSource();
+        const notification = HAS_MODERN_MESSAGE_TRAY
+            ? new MessageTray.Notification({source, title, body})
+            : new MessageTray.Notification(source, title, body);
+        // The notification and its handler go with the source in destroy().
+        if (onActivated)
+            notification.connect('activated', () => onActivated());
         if (HAS_MODERN_MESSAGE_TRAY)
-            source.addNotification(new MessageTray.Notification({source, title, body}));
+            source.addNotification(notification);
         else
-            source.showNotification(new MessageTray.Notification(source, title, body));
+            source.showNotification(notification);
     }
 
     _ensureSource() {
