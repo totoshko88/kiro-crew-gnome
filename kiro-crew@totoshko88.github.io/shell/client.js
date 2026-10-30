@@ -21,6 +21,7 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 import {isCancelled} from '../lib/cancel.js';
+import {refreshDelaySecs} from '../lib/token.js';
 
 const DECODER = new TextDecoder('utf-8');
 const ENCODER = new TextEncoder();
@@ -43,6 +44,7 @@ export class GatewayClient {
         this._wsSignalIds = [];
         this._wsCancellable = null;
         this._reconnectId = 0;
+        this._refreshId = 0;
         this._backoff = 1;
         this._online = false;
         this._authError = false;
@@ -95,6 +97,7 @@ export class GatewayClient {
             return;
         this._paused = true;
         this._cancelReconnect();
+        this._cancelRefresh();
         this._closeWebsocket();
         this._setOnline(false);
     }
@@ -214,6 +217,7 @@ export class GatewayClient {
     _openWebsocket() {
         if (this._paused)
             return;
+        this._cancelRefresh();
         this._closeWebsocket();
         const message = Soup.Message.new('GET', this._wsUri());
         const cancellable = new Gio.Cancellable();
@@ -245,6 +249,7 @@ export class GatewayClient {
                 this._backoff = 1;
                 this._setAuthError(false);
                 this._setOnline(true);
+                this._scheduleRefresh();
                 this._wsSignalIds = [
                     ws.connect('message', (_c, type, bytes) => {
                         if (type === Soup.WebsocketDataType.TEXT)
@@ -253,6 +258,7 @@ export class GatewayClient {
                     ws.connect('closed', () => {
                         this._disconnectWsSignals();
                         this._ws = null;
+                        this._cancelRefresh();
                         this._setOnline(false);
                         this._scheduleReconnect();
                     }),
@@ -301,6 +307,48 @@ export class GatewayClient {
         }
     }
 
+    /**
+     * Refresh the session cookie a little before the short query token's `exp`,
+     * so the gateway renews the cookie while the token can still be exchanged —
+     * instead of waiting for a 403 after it lapses. A cheap authenticated GET
+     * carrying the query token re-runs the token→cookie exchange and extends
+     * the cookie's lifetime without disturbing the live WebSocket. Armed on a
+     * successful connect, re-armed after each refresh, cancelled on close.
+     */
+    _scheduleRefresh() {
+        this._cancelRefresh();
+        const {token} = this._getConfig();
+        if (!token)
+            return;
+        const delay = Math.round(refreshDelaySecs(token, Date.now()));
+        this._refreshId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, Math.max(1, delay), () => {
+            this._refreshId = 0;
+            this._refreshSession();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelRefresh() {
+        if (this._refreshId) {
+            GLib.source_remove(this._refreshId);
+            this._refreshId = 0;
+        }
+    }
+
+    /** One refresh ping, then arm the next — only while connected. */
+    _refreshSession() {
+        if (this._paused || !this._online)
+            return;
+        // fetchStatus() carries the query token; a 2xx renews the cookie, a
+        // 401/403 flips authError and the normal reconnect/mint path recovers.
+        this.fetchStatus()
+            .then(() => {
+                if (this._online && !this._paused)
+                    this._scheduleRefresh();
+            })
+            .catch(() => {});
+    }
+
     _disconnectWsSignals() {
         for (const id of this._wsSignalIds)
             this._ws.disconnect(id);
@@ -324,6 +372,7 @@ export class GatewayClient {
 
     destroy() {
         this._cancelReconnect();
+        this._cancelRefresh();
         this._closeWebsocket();
         this._cancellable.cancel();
         this._session.abort();
