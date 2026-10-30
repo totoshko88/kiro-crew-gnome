@@ -2,34 +2,48 @@
 
 ## Creating a Release
 
-### 1. Update Changelog
+**The release is the pushed `v*` tag, not the merge.** The CI workflow runs on
+every push/PR, but the Release workflow (`.github/workflows/release.yml`)
+triggers *only* on a tag matching `v*`. Merging the version PR into `main` runs
+CI and bumps the version — it does **not** build the zip or create the GitHub
+Release. That only happens when you push the tag. Forgetting the tag leaves
+`main` bumped with no release.
+
+### The one-command path (recommended)
+
+Prepare the version on a branch, open a PR, and merge it into `main` (CI must be
+green). The version bump lives in that PR:
+
+- `CHANGELOG.md` has a `## [X.Y.Z]` section (its body becomes the release notes),
+- `kiro-crew@totoshko88.github.io/metadata.json` `version-name` is `X.Y.Z`,
+- `package.json` `version` is `X.Y.Z`,
+- `README.md` version badge is updated.
+
+Then, on an up-to-date `main`, cut the release:
 
 ```bash
-# Update CHANGELOG.md with changes for the new version.
-# metadata.json carries no integer "version": the review guidelines mark it
-# deprecated, and extensions.gnome.org sets it itself on upload.
+scripts/release.sh          # version read from metadata.json
+# or: scripts/release.sh 0.1.6
+# or: DRY_RUN=1 scripts/release.sh   # run every check, tag nothing
 ```
 
-### 2. Build Package
-
-```bash
-make pack
-# Creates: kiro-crew@totoshko88.github.io.shell-extension.zip
-```
-
-### 3. Create Git Tag
-
-```bash
-# Stage only your own changed files by explicit path (never `git add -A`)
-git add CHANGELOG.md <other-changed-files>
-git commit -m "release: vX.Y.Z"
-git push origin main
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
+`scripts/release.sh` refuses to release unless the tree is clean, you are on an
+in-sync `main`, the version is consistent across metadata/package/CHANGELOG, the
+tag does not already exist, `main`'s CI is green, and the local gates (lint,
+`make test-logic`, `make validate`, `make pack`) pass. It then creates the
+annotated tag, pushes **only the tag** (never `main` — that branch is
+protected), watches the Release workflow, and prints the release URL.
 
 The release workflow sets `version-name` from the tag, runs `make pack`, and
-creates a release with notes from CHANGELOG.md.
+creates a GitHub Release with the notes extracted from `CHANGELOG.md`.
+
+### Manual tag (fallback, if you can't run the script)
+
+```bash
+# On an up-to-date main, with the version already merged in:
+git tag -a vX.Y.Z -m "vX.Y.Z" main
+git push origin vX.Y.Z          # push the TAG only; never `git push origin main`
+```
 
 ## Manual Release (if needed)
 
@@ -75,9 +89,15 @@ upload itself; `metadata.json` has no integer `version`.
 
 ## Pre-Release Checklist
 
-- [ ] State tests pass (`make test-logic`)
+Most of this is enforced automatically by `scripts/release.sh`; the list is the
+human-facing version of its checks.
+
+- [ ] State/logic tests pass (`make test-logic`)
 - [ ] EGO guidelines validated (`bash tests/validate-review-guidelines.sh`)
-- [ ] CHANGELOG.md updated
+- [ ] CHANGELOG.md has a non-empty `## [X.Y.Z]` section
+- [ ] `metadata.json` `version-name`, `package.json` `version`, and the tag all agree
 - [ ] README.md version badge updated
 - [ ] `metadata.json` has no integer `version` key (set by extensions.gnome.org)
 - [ ] Any clipboard use is declared in the `metadata.json` description
+- [ ] Version PR merged into `main` and `main`'s CI is green **before** tagging
+- [ ] Release cut with `scripts/release.sh` (which pushes the `v*` tag)
