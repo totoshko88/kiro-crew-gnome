@@ -6,7 +6,7 @@
   "scripts": {
     "lint": "eslint \"kiro-crew@totoshko88.github.io/*.js\" \"kiro-crew@totoshko88.github.io/lib/*.js\" \"kiro-crew@totoshko88.github.io/shell/*.js\" \"kiro-crew@totoshko88.github.io/prefs/*.js\"",
     "lint:fix": "eslint --fix \"kiro-crew@totoshko88.github.io/*.js\" \"kiro-crew@totoshko88.github.io/lib/*.js\" \"kiro-crew@totoshko88.github.io/shell/*.js\" \"kiro-crew@totoshko88.github.io/prefs/*.js\"",
-    "test": "gjs -m tests/test-state.js && gjs -m tests/test-profiles.js && gjs -m tests/test-updates.js"
+    "test": "gjs -m tests/test-state.js && gjs -m tests/test-profiles.js && gjs -m tests/test-updates.js && gjs -m tests/test-token.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.12.0",

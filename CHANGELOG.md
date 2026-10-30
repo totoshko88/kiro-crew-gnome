@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5]
+
+Keeps the ghost connected across the short-lived access tokens that Kiro Crew gateway 0.11 introduced.
+
+### Fixed
+
+- **The ghost turned red a few minutes after the gateway started or restarted** (including right after a gateway update), reading "Token expired — update in Settings" even though the gateway was healthy. Since gateway 0.11 the access token is a short-lived bearer credential (its `exp` is only minutes out); the extension sent it as a query parameter on every request and never kept the HttpOnly session cookie the gateway hands back in exchange, so once that `exp` passed every request and the WebSocket were rejected with 403. The extension now keeps that cookie (a `Soup.CookieJar` on the transport session), so the connection authenticates by the long-lived session the cookie carries and survives the token's short `exp`. The token still rides every URL, so the first request re-seeds the session and a lost cookie re-exchanges on its own. The cookie is dropped when the profile switches or a fresh token is adopted, so one gateway's session can never shadow another's.
+
 ## [0.1.4]
 
 Catches up with Kiro Crew gateway 0.11.

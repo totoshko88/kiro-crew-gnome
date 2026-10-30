@@ -5,6 +5,15 @@
  * one-shot HTTP call. Every pending request is tied to one Gio.Cancellable:
  * after destroy() its promise rejects with G_IO_ERROR_CANCELLED, so no caller
  * code runs past the await.
+ *
+ * Auth (gateway 0.11+): the access token is a short-lived bearer credential
+ * sent once as a `?token=` query parameter. The gateway exchanges it for an
+ * HttpOnly session cookie (`mc_token_<port>`) that rides a far longer
+ * `session_exp`, and from then on every request authenticates by that cookie.
+ * A Soup.CookieJar on the session stores and resends it (over HTTP and the
+ * WebSocket handshake alike), so the connection no longer dies when the short
+ * `exp` lapses. The token is still appended to every URL: it is ignored once
+ * the cookie is valid and re-seeds the session if the cookie was lost.
  */
 
 import Soup from 'gi://Soup';
@@ -25,6 +34,10 @@ export class GatewayClient {
     constructor(getConfig) {
         this._getConfig = getConfig;
         this._session = new Soup.Session({timeout: 10});
+        // Keep the session cookie the gateway hands back for the short-lived
+        // query token, so auth survives that token's `exp` (gateway 0.11+).
+        this._cookies = new Soup.CookieJar();
+        this._session.add_feature(this._cookies);
         this._cancellable = new Gio.Cancellable();
         this._ws = null;
         this._wsSignalIds = [];
@@ -65,6 +78,16 @@ export class GatewayClient {
         this._backoff = 1;
         this._cancelReconnect();
         this._openWebsocket();
+    }
+
+    /**
+     * Forget the session cookie. Called when the gateway changes under us (a
+     * profile switch) or a fresh token is adopted, so a cookie minted for the
+     * old credential can't shadow the new query token on the next exchange.
+     */
+    clearSession() {
+        for (const cookie of this._cookies.all_cookies())
+            this._cookies.delete_cookie(cookie);
     }
 
     pause() {

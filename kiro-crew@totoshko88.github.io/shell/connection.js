@@ -125,6 +125,9 @@ export class GatewayConnection {
         if (key !== this._key) {
             this._key = key;
             this._openTunnel();
+            // A different gateway: drop the old one's session cookie so it
+            // can't shadow the new profile's token on the next exchange.
+            this._client.clearSession();
             if (this._client.paused)
                 this._client.resume();
             else
@@ -134,6 +137,9 @@ export class GatewayConnection {
             return 'switched';
         }
         if (this._profile.token !== prev.token) {
+            // A fresh token for the same gateway: exchange it for a new
+            // cookie rather than riding the stale one.
+            this._client.clearSession();
             this._client.reconnectNow();
             return 'token';
         }
