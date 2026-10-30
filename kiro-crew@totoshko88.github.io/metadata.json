@@ -6,7 +6,7 @@
     "url": "https://github.com/totoshko88/kiro-crew-gnome",
     "settings-schema": "org.gnome.shell.extensions.kiro-crew",
     "gettext-domain": "kiro-crew",
-    "version-name": "0.1.4",
+    "version-name": "0.1.5",
     "donations": {
         "custom": [
             "https://donatello.to/totoshko88",
