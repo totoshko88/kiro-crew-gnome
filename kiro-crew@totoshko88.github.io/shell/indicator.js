@@ -27,6 +27,12 @@ import {
 // Opacity of the panel icon while the gateway is stopped on purpose (0-255).
 const STOPPED_OPACITY = 115;
 
+// How long a token rejection reads as a transient reconnect before it escalates
+// to "Token expired — update in Settings". A gateway restart, or the few-second
+// window while the session cookie re-exchanges, clears well inside this; a
+// genuinely bad token outlasts it.
+const AUTH_GRACE_S = 12;
+
 // The notification channel of tool approval requests.
 const APPROVAL_CHANNEL = 'system.approval';
 
@@ -51,6 +57,8 @@ export class Indicator {
         this._criticalNotice = false;
         this._tunnelNotified = '';
         this._mintRefusedNotified = false;
+        this._authErrorSince = 0;
+        this._authGraceId = 0;
         this._pollId = 0;
         this._giconCache = new Map();
 
@@ -226,6 +234,7 @@ export class Indicator {
     _recompute() {
         const client = this._connection.client;
         const prev = this._state;
+        this._trackAuthError(client.authError);
         const next = aggregateState({
             online: client.online,
             slots: this._slots,
@@ -248,6 +257,47 @@ export class Indicator {
             this._refreshSessions();
     }
 
+    /**
+     * Note when a token rejection started, and schedule one re-render for the
+     * moment its grace window ends, so the header escalates from "Reconnecting…"
+     * to "Token expired" on its own even if nothing else changes. Cleared the
+     * instant the rejection clears.
+     */
+    _trackAuthError(bad) {
+        if (bad) {
+            if (!this._authErrorSince) {
+                this._authErrorSince = GLib.get_monotonic_time();
+                this._armAuthGrace();
+            }
+        } else if (this._authErrorSince) {
+            this._authErrorSince = 0;
+            this._cancelAuthGrace();
+        }
+    }
+
+    _armAuthGrace() {
+        this._cancelAuthGrace();
+        this._authGraceId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, AUTH_GRACE_S + 1, () => {
+            this._authGraceId = 0;
+            this._updateHeader();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelAuthGrace() {
+        if (this._authGraceId) {
+            GLib.source_remove(this._authGraceId);
+            this._authGraceId = 0;
+        }
+    }
+
+    /** Has a current token rejection outlasted its transient grace window? */
+    _authGracePassed() {
+        if (!this._authErrorSince)
+            return false;
+        return GLib.get_monotonic_time() - this._authErrorSince >= AUTH_GRACE_S * GLib.USEC_PER_SEC;
+    }
+
     _headerLabel() {
         if (this._state === STATE.STOPPED && this._lifecycle.starting)
             return _('Starting gateway…');
@@ -255,6 +305,11 @@ export class Indicator {
             return _('Stopping gateway…');
         if (this._state === STATE.OFFLINE && this._connection.tunnelDown)
             return _('SSH tunnel down — retrying');
+        // A fresh token rejection is usually transient — a gateway restart, or
+        // the brief window while the session cookie re-exchanges. Read it as a
+        // reconnect until it has clearly persisted, then name it plainly.
+        if (this._state === STATE.AUTH && !this._authGracePassed())
+            return _('Reconnecting…');
         return stateLabel(this._state);
     }
 
@@ -446,6 +501,7 @@ export class Indicator {
 
     destroy() {
         this._stopPoll();
+        this._cancelAuthGrace();
         this._settings.disconnect(this._settingsChangedId);
         this.button.disconnect(this._buttonPressId);
         this._confirmation.destroy();

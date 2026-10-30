@@ -16,6 +16,10 @@ Keeps the ghost connected across the short-lived access tokens that Kiro Crew ga
 
 - **The session cookie is now refreshed before it would lapse, not after.** A short while before the access token's `exp`, the extension makes one cheap authenticated request that re-exchanges the token and extends the session cookie, without disturbing the live WebSocket. This keeps the session healthy proactively instead of relying on recovery after a 403, and re-arms itself for as long as the connection stays up.
 
+### Changed
+
+- **A brief token rejection no longer reads as a hard error.** A gateway restart, or the few seconds while the session cookie re-exchanges, can momentarily reject the token. The menu header now says *Reconnecting…* for a short grace window and only escalates to *Token expired — update in Settings* once the rejection clearly persists, so a normal restart no longer flashes an alarming message.
+
 ## [0.1.4]
 
 Catches up with Kiro Crew gateway 0.11.
