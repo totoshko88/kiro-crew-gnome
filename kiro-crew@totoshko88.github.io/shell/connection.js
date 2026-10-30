@@ -163,8 +163,22 @@ export class GatewayConnection {
         // Storing the token rewrites the profile; reload() then reconnects.
         mint.then(token => {
             this._mintingToken = false;
-            if (token && this._profile.id === id && token !== this._profile.token)
-                setProfileToken(this._settings, id, token);
+            if (this._profile.id !== id)
+                return;
+            if (token) {
+                if (token !== this._profile.token)
+                    setProfileToken(this._settings, id, token);
+                return;
+            }
+            // A local mint the gateway refused on owner-provenance grounds
+            // (gateway 0.11+) can't be retried into success — the shell is not
+            // the owner process the gateway will mint for. Tell the caller so
+            // it can point the user at the dashboard's CLI login link once,
+            // instead of looping. A network error ('' with no refusal code)
+            // is left to the normal reconnect path.
+            const code = this.isLocal ? this._bootstrap.lastCode : '';
+            if (code && code !== 'unreachable' && this._handlers.onMintRefused)
+                this._handlers.onMintRefused(code);
         }).catch(e => {
             this._mintingToken = false;
             logUnlessCancelled(e, 'token fetch failed');

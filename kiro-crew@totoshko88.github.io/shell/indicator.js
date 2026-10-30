@@ -50,6 +50,7 @@ export class Indicator {
         this._state = STATE.OFFLINE;
         this._criticalNotice = false;
         this._tunnelNotified = '';
+        this._mintRefusedNotified = false;
         this._pollId = 0;
         this._giconCache = new Map();
 
@@ -74,6 +75,7 @@ export class Indicator {
             onUpdateProgress: progress => this._updates.onProgress(progress),
             onOnline: online => this._onOnline(online),
             onAuthError: () => this._recompute(),
+            onMintRefused: code => this._onMintRefused(code),
             onTunnelState: (state, error) => this._onTunnelState(state, error)
         });
         this._lifecycle = new GatewayLifecycle(this._connection, this._notifier, () => this._recompute());
@@ -139,6 +141,23 @@ export class Indicator {
         this._recompute();
     }
 
+    /**
+     * The local owner-token bootstrap was refused by the gateway (0.11+ checks
+     * the calling process). We can't mint from here, so there's no point
+     * looping: tell the user once how to authenticate, and open the dashboard
+     * login link on click. Cleared when the connection recovers, so a later
+     * refusal can notify again.
+     */
+    _onMintRefused(_code) {
+        if (this._mintRefusedNotified)
+            return;
+        this._mintRefusedNotified = true;
+        this._notifier.notify(
+            _('Kiro Crew needs a fresh sign-in'),
+            _('The gateway wouldn’t issue a token to the extension. Open the dashboard to sign in, then come back.'),
+            () => this._openUrl(this._connection.pageUrl('/')));
+    }
+
     _onTunnelState(state, error) {
         // One notification per distinct ssh error, not one per retry.
         if (state === 'down' && error !== this._tunnelNotified) {
@@ -159,6 +178,8 @@ export class Indicator {
 
     _onOnline(online) {
         this._lifecycle.onOnline(online);
+        if (online)
+            this._mintRefusedNotified = false;
         if (!online)
             this._slots = [];
         this._recompute();
