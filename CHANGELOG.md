@@ -12,6 +12,8 @@ Keeps the ghost connected across the short-lived access tokens that Kiro Crew ga
 
 - **A local token the gateway won't mint is handled gracefully instead of looping silently.** Gateway 0.11 only issues a local token to a request it can verify as the owner's own process, over its owner-only unix socket. When the gateway refuses (it told us so, with code `member_owner_token_refused`), the extension no longer keeps trying in vain: it notifies you once — *Kiro Crew needs a fresh sign-in* — and a click opens the dashboard so you can sign in. A plain network error still falls through to the normal reconnect.
 
+- **The token is re-minted on every reconnect attempt while it's rejected, not just once.** Previously the extension asked for a fresh token only at the instant the first rejection was seen; if that single mint failed or raced, the stale token was retried forever and the ghost sat on *Gateway offline* while the gateway was healthy. Each reconnect tick now mints a fresh token first (for a local or SSH-controlled gateway) and reconnects with it, and always reconnects even when the mint produced nothing, so the backoff loop can't stall on an expired token.
+
 ### Added
 
 - **The session cookie is now refreshed before it would lapse, not after.** A short while before the access token's `exp`, the extension makes one cheap authenticated request that re-exchanges the token and extends the session cookie, without disturbing the live WebSocket. This keeps the session healthy proactively instead of relying on recovery after a 403, and re-arms itself for as long as the connection stays up.

@@ -57,7 +57,11 @@ export class GatewayClient {
     /**
      * @param {object} callbacks onSlots(slots), onNotification(note),
      *   onStatus(status) (the periodic "dashboard" frame),
-     *   onUpdateProgress({step, detail}), onOnline(bool), onAuthError(bool)
+     *   onUpdateProgress({step, detail}), onOnline(bool), onAuthError(bool),
+     *   onReauth() — a reconnect tick is due while the token is being rejected;
+     *   the owner re-mints and reconnects (it owns that this tick, so the
+     *   client does not also reconnect). Optional: without it, the client
+     *   reconnects with the existing token as before.
      */
     start(callbacks) {
         this._cb = callbacks;
@@ -295,6 +299,16 @@ export class GatewayClient {
         this._backoff = Math.min(this._backoff * 2, BACKOFF_MAX_S);
         this._reconnectId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, delay, () => {
             this._reconnectId = 0;
+            // A handshake that keeps failing on auth needs a FRESH token, not
+            // just another retry with the rejected one: the gateway's local
+            // token is short-lived (0.11+), so re-mint on every backoff tick
+            // while rejected instead of only on the first 401/403. The mint
+            // rewrites the profile, which reconnects us; if it mints nothing
+            // (no owner bootstrap) we still reconnect below and retry later.
+            if (this._authError && this._cb && this._cb.onReauth) {
+                this._cb.onReauth();
+                return GLib.SOURCE_REMOVE;
+            }
             this._openWebsocket();
             return GLib.SOURCE_REMOVE;
         });
