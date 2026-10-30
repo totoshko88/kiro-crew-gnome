@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5]
+
+Keeps the ghost connected across the short-lived access tokens that Kiro Crew gateway 0.11 introduced.
+
+### Fixed
+
+- **The ghost sat on "Gateway offline" against a healthy gateway, reconnecting in a loop.** This was the main breakage after the Kiro Crew gateway reached 0.11. Soup caps an incoming WebSocket frame at 128 KiB by default, and the gateway's live `slots`/`dashboard` frames now exceed that (observed ~136 KiB). The very first frame tripped Soup's *payload larger than max-incoming-payload-size*, which closed the socket immediately; the extension read that as the gateway dropping, went offline, reconnected, and hit the same wall — so it never stayed connected and the ghost blinked red. The extension now lifts the incoming-payload limit on each WebSocket, so large frames are accepted and the connection stays up. This is independent of the token work below.
+
+- **The ghost turned red a few minutes after the gateway started or restarted** (including right after a gateway update), reading "Token expired — update in Settings" even though the gateway was healthy. Since gateway 0.11 the access token is a short-lived bearer credential (its `exp` is only minutes out); the extension sent it as a query parameter on every request and never kept the HttpOnly session cookie the gateway hands back in exchange, so once that `exp` passed every request and the WebSocket were rejected with 403. The extension now keeps that cookie (a `Soup.CookieJar` on the transport session), so the connection authenticates by the long-lived session the cookie carries and survives the token's short `exp`. The token still rides every URL, so the first request re-seeds the session and a lost cookie re-exchanges on its own. The cookie is dropped when the profile switches or a fresh token is adopted, so one gateway's session can never shadow another's.
+
+- **A local token the gateway won't mint is handled gracefully instead of looping silently.** Gateway 0.11 only issues a local token to a request it can verify as the owner's own process, over its owner-only unix socket. When the gateway refuses (it told us so, with code `member_owner_token_refused`), the extension no longer keeps trying in vain: it notifies you once — *Kiro Crew needs a fresh sign-in* — and a click opens the dashboard so you can sign in. A plain network error still falls through to the normal reconnect.
+
+- **The token is re-minted on every reconnect attempt while it's rejected, not just once.** Previously the extension asked for a fresh token only at the instant the first rejection was seen; if that single mint failed or raced, the stale token was retried forever and the ghost sat on *Gateway offline* while the gateway was healthy. Each reconnect tick now mints a fresh token first (for a local or SSH-controlled gateway) and reconnects with it, and always reconnects even when the mint produced nothing, so the backoff loop can't stall on an expired token.
+
+### Added
+
+- **The session cookie is now refreshed before it would lapse, not after.** A short while before the access token's `exp`, the extension makes one cheap authenticated request that re-exchanges the token and extends the session cookie, without disturbing the live WebSocket. This keeps the session healthy proactively instead of relying on recovery after a 403, and re-arms itself for as long as the connection stays up.
+
+### Changed
+
+- **A brief token rejection no longer reads as a hard error.** A gateway restart, or the few seconds while the session cookie re-exchanges, can momentarily reject the token. The menu header now says *Reconnecting…* for a short grace window and only escalates to *Token expired — update in Settings* once the rejection clearly persists, so a normal restart no longer flashes an alarming message.
+- **The one-shot 0.1.2 migration keys are cleared once they've been read.** After the old `endpoint`/`endpoints`/`token` settings are migrated into profiles they are reset to their defaults, so a stale endpoint (e.g. a `localhost:3676` left over from an earlier setup) or a leftover access token no longer lingers in GSettings where it could mislead a diagnosis. Only a value that still differs from its default is touched, so a clean install writes nothing.
+
 ## [0.1.4]
 
 Catches up with Kiro Crew gateway 0.11.

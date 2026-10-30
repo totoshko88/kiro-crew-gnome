@@ -11,6 +11,7 @@ test-logic:
 	gjs -m tests/test-state.js
 	gjs -m tests/test-profiles.js
 	gjs -m tests/test-updates.js
+	gjs -m tests/test-token.js
 
 # Lint the extension sources with ESLint. No-op (with a note) if eslint is not
 # installed, so a source checkout without node_modules can still run `make lint`.

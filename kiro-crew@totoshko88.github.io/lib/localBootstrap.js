@@ -25,19 +25,36 @@ function crewPath(name) {
 export class LocalBootstrap {
     constructor() {
         this._cancellable = new Gio.Cancellable();
+        this._lastCode = '';
+    }
+
+    /**
+     * The gateway's machine-readable reason the last fetchToken() returned '',
+     * or '' on success or a network error. Since gateway 0.11 the owner-token
+     * bootstrap verifies the calling process, so a refusal here is expected
+     * (code 'member_owner_token_refused') and the caller should point the user
+     * at the dashboard's CLI login link rather than retry in a loop.
+     */
+    get lastCode() {
+        return this._lastCode;
     }
 
     /** Mint a dashboard token; resolves to the token, or '' when refused. */
     async fetchToken(port) {
+        this._lastCode = '';
         const {status, text} = await this._send(port, 'GET', '/api/token/local');
-        if (status !== Soup.Status.OK)
-            return '';
+        let data = null;
         try {
-            const data = JSON.parse(text);
-            return typeof data.token === 'string' ? data.token : '';
+            data = text ? JSON.parse(text) : null;
         } catch {
-            return '';
+            data = null;
         }
+        if (status === Soup.Status.OK && data && typeof data.token === 'string')
+            return data.token;
+        // Record why, so the caller can tell a refusal apart from a dead socket.
+        this._lastCode = (data && typeof data.code === 'string' && data.code) ||
+            (status ? `http_${status}` : 'unreachable');
+        return '';
     }
 
     /** Shut down a hand-run gateway (no service manager to ask). */

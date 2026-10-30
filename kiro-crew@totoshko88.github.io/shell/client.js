@@ -5,6 +5,15 @@
  * one-shot HTTP call. Every pending request is tied to one Gio.Cancellable:
  * after destroy() its promise rejects with G_IO_ERROR_CANCELLED, so no caller
  * code runs past the await.
+ *
+ * Auth (gateway 0.11+): the access token is a short-lived bearer credential
+ * sent once as a `?token=` query parameter. The gateway exchanges it for an
+ * HttpOnly session cookie (`mc_token_<port>`) that rides a far longer
+ * `session_exp`, and from then on every request authenticates by that cookie.
+ * A Soup.CookieJar on the session stores and resends it (over HTTP and the
+ * WebSocket handshake alike), so the connection no longer dies when the short
+ * `exp` lapses. The token is still appended to every URL: it is ignored once
+ * the cookie is valid and re-seeds the session if the cookie was lost.
  */
 
 import Soup from 'gi://Soup';
@@ -12,6 +21,7 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 import {isCancelled} from '../lib/cancel.js';
+import {refreshDelaySecs} from '../lib/token.js';
 
 const DECODER = new TextDecoder('utf-8');
 const ENCODER = new TextEncoder();
@@ -25,11 +35,16 @@ export class GatewayClient {
     constructor(getConfig) {
         this._getConfig = getConfig;
         this._session = new Soup.Session({timeout: 10});
+        // Keep the session cookie the gateway hands back for the short-lived
+        // query token, so auth survives that token's `exp` (gateway 0.11+).
+        this._cookies = new Soup.CookieJar();
+        this._session.add_feature(this._cookies);
         this._cancellable = new Gio.Cancellable();
         this._ws = null;
         this._wsSignalIds = [];
         this._wsCancellable = null;
         this._reconnectId = 0;
+        this._refreshId = 0;
         this._backoff = 1;
         this._online = false;
         this._authError = false;
@@ -42,7 +57,11 @@ export class GatewayClient {
     /**
      * @param {object} callbacks onSlots(slots), onNotification(note),
      *   onStatus(status) (the periodic "dashboard" frame),
-     *   onUpdateProgress({step, detail}), onOnline(bool), onAuthError(bool)
+     *   onUpdateProgress({step, detail}), onOnline(bool), onAuthError(bool),
+     *   onReauth() — a reconnect tick is due while the token is being rejected;
+     *   the owner re-mints and reconnects (it owns that this tick, so the
+     *   client does not also reconnect). Optional: without it, the client
+     *   reconnects with the existing token as before.
      */
     start(callbacks) {
         this._cb = callbacks;
@@ -67,11 +86,22 @@ export class GatewayClient {
         this._openWebsocket();
     }
 
+    /**
+     * Forget the session cookie. Called when the gateway changes under us (a
+     * profile switch) or a fresh token is adopted, so a cookie minted for the
+     * old credential can't shadow the new query token on the next exchange.
+     */
+    clearSession() {
+        for (const cookie of this._cookies.all_cookies())
+            this._cookies.delete_cookie(cookie);
+    }
+
     pause() {
         if (this._paused)
             return;
         this._paused = true;
         this._cancelReconnect();
+        this._cancelRefresh();
         this._closeWebsocket();
         this._setOnline(false);
     }
@@ -191,6 +221,7 @@ export class GatewayClient {
     _openWebsocket() {
         if (this._paused)
             return;
+        this._cancelRefresh();
         this._closeWebsocket();
         const message = Soup.Message.new('GET', this._wsUri());
         const cancellable = new Gio.Cancellable();
@@ -220,8 +251,16 @@ export class GatewayClient {
                 this._wsCancellable = null;
                 this._ws = ws;
                 this._backoff = 1;
+                // Soup caps an incoming frame at 128 KiB by default; the
+                // gateway's slots/dashboard frames exceed that (0.11+), so
+                // without this the very first frame trips
+                // "payload larger than max-incoming-payload-size", the socket
+                // closes, and the ghost sits on "Gateway offline" forever,
+                // reconnecting in a loop. 0 lifts the limit.
+                ws.set_max_incoming_payload_size(0);
                 this._setAuthError(false);
                 this._setOnline(true);
+                this._scheduleRefresh();
                 this._wsSignalIds = [
                     ws.connect('message', (_c, type, bytes) => {
                         if (type === Soup.WebsocketDataType.TEXT)
@@ -230,6 +269,7 @@ export class GatewayClient {
                     ws.connect('closed', () => {
                         this._disconnectWsSignals();
                         this._ws = null;
+                        this._cancelRefresh();
                         this._setOnline(false);
                         this._scheduleReconnect();
                     }),
@@ -266,6 +306,16 @@ export class GatewayClient {
         this._backoff = Math.min(this._backoff * 2, BACKOFF_MAX_S);
         this._reconnectId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, delay, () => {
             this._reconnectId = 0;
+            // A handshake that keeps failing on auth needs a FRESH token, not
+            // just another retry with the rejected one: the gateway's local
+            // token is short-lived (0.11+), so re-mint on every backoff tick
+            // while rejected instead of only on the first 401/403. The mint
+            // rewrites the profile, which reconnects us; if it mints nothing
+            // (no owner bootstrap) we still reconnect below and retry later.
+            if (this._authError && this._cb && this._cb.onReauth) {
+                this._cb.onReauth();
+                return GLib.SOURCE_REMOVE;
+            }
             this._openWebsocket();
             return GLib.SOURCE_REMOVE;
         });
@@ -276,6 +326,48 @@ export class GatewayClient {
             GLib.source_remove(this._reconnectId);
             this._reconnectId = 0;
         }
+    }
+
+    /**
+     * Refresh the session cookie a little before the short query token's `exp`,
+     * so the gateway renews the cookie while the token can still be exchanged —
+     * instead of waiting for a 403 after it lapses. A cheap authenticated GET
+     * carrying the query token re-runs the token→cookie exchange and extends
+     * the cookie's lifetime without disturbing the live WebSocket. Armed on a
+     * successful connect, re-armed after each refresh, cancelled on close.
+     */
+    _scheduleRefresh() {
+        this._cancelRefresh();
+        const {token} = this._getConfig();
+        if (!token)
+            return;
+        const delay = Math.round(refreshDelaySecs(token, Date.now()));
+        this._refreshId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, Math.max(1, delay), () => {
+            this._refreshId = 0;
+            this._refreshSession();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelRefresh() {
+        if (this._refreshId) {
+            GLib.source_remove(this._refreshId);
+            this._refreshId = 0;
+        }
+    }
+
+    /** One refresh ping, then arm the next — only while connected. */
+    _refreshSession() {
+        if (this._paused || !this._online)
+            return;
+        // fetchStatus() carries the query token; a 2xx renews the cookie, a
+        // 401/403 flips authError and the normal reconnect/mint path recovers.
+        this.fetchStatus()
+            .then(() => {
+                if (this._online && !this._paused)
+                    this._scheduleRefresh();
+            })
+            .catch(() => {});
     }
 
     _disconnectWsSignals() {
@@ -301,6 +393,7 @@ export class GatewayClient {
 
     destroy() {
         this._cancelReconnect();
+        this._cancelRefresh();
         this._closeWebsocket();
         this._cancellable.cancel();
         this._session.abort();

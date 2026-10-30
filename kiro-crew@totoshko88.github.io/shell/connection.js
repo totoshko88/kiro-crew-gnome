@@ -48,7 +48,8 @@ export class GatewayConnection {
                 this._handlers.onAuthError(bad);
                 if (bad)
                     this.tryToken();
-            }
+            },
+            onReauth: () => this._reauth()
         });
         this._openTunnel();
         if (!this._profile.token)
@@ -125,6 +126,9 @@ export class GatewayConnection {
         if (key !== this._key) {
             this._key = key;
             this._openTunnel();
+            // A different gateway: drop the old one's session cookie so it
+            // can't shadow the new profile's token on the next exchange.
+            this._client.clearSession();
             if (this._client.paused)
                 this._client.resume();
             else
@@ -134,6 +138,9 @@ export class GatewayConnection {
             return 'switched';
         }
         if (this._profile.token !== prev.token) {
+            // A fresh token for the same gateway: exchange it for a new
+            // cookie rather than riding the stale one.
+            this._client.clearSession();
             this._client.reconnectNow();
             return 'token';
         }
@@ -148,21 +155,65 @@ export class GatewayConnection {
      */
     tryToken() {
         if (this._mintingToken || !this.canControl)
-            return;
+            return Promise.resolve(false);
         const id = this._profile.id;
         this._mintingToken = true;
         const mint = this.isLocal
             ? this._bootstrap.fetchToken(this._profile.port)
             : this._remote.fetchToken(this._profile);
         // Storing the token rewrites the profile; reload() then reconnects.
-        mint.then(token => {
+        // Resolves true when the profile token changed (a reconnect is already
+        // on its way), false otherwise (the caller may need to reconnect).
+        return mint.then(token => {
             this._mintingToken = false;
-            if (token && this._profile.id === id && token !== this._profile.token)
-                setProfileToken(this._settings, id, token);
+            if (this._profile.id !== id)
+                return false;
+            if (token) {
+                if (token !== this._profile.token) {
+                    setProfileToken(this._settings, id, token);
+                    return true;
+                }
+                return false;
+            }
+            // A local mint the gateway refused on owner-provenance grounds
+            // (gateway 0.11+) can't be retried into success — the shell is not
+            // the owner process the gateway will mint for. Tell the caller so
+            // it can point the user at the dashboard's CLI login link once,
+            // instead of looping. A network error ('' with no refusal code)
+            // is left to the normal reconnect path.
+            const code = this.isLocal ? this._bootstrap.lastCode : '';
+            if (code && code !== 'unreachable' && this._handlers.onMintRefused)
+                this._handlers.onMintRefused(code);
+            return false;
         }).catch(e => {
             this._mintingToken = false;
             logUnlessCancelled(e, 'token fetch failed');
+            return false;
         });
+    }
+
+    /**
+     * A reconnect tick while the gateway keeps rejecting our token: get a fresh
+     * one and reconnect with it. For a controllable profile that means minting
+     * (tryToken rewrites the profile, and reload() reconnects); either way we
+     * always reconnect so the backoff loop never stalls on a mint that minted
+     * nothing. Called from the client's reconnect timer, so it replaces the
+     * plain reconnect that tick rather than adding a second one.
+     */
+    _reauth() {
+        // Try for a fresh token first (controllable profiles). If the mint
+        // produced a new one, reload() is already reconnecting with it, so we
+        // don't reconnect again here. If it produced nothing — the same token,
+        // a refusal, a network error, or a read-only remote — reconnect anyway
+        // so the backoff loop keeps turning and never stalls on a stale token.
+        if (this.canControl && !this._mintingToken) {
+            this.tryToken().then(changed => {
+                if (!changed)
+                    this._client.reconnectNow();
+            });
+            return;
+        }
+        this._client.reconnectNow();
     }
 
     /** Shut down a hand-run gateway on this computer through its local bootstrap. */
