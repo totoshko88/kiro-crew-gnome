@@ -19,6 +19,7 @@ Keeps the ghost connected across the short-lived access tokens that Kiro Crew ga
 ### Changed
 
 - **A brief token rejection no longer reads as a hard error.** A gateway restart, or the few seconds while the session cookie re-exchanges, can momentarily reject the token. The menu header now says *Reconnecting…* for a short grace window and only escalates to *Token expired — update in Settings* once the rejection clearly persists, so a normal restart no longer flashes an alarming message.
+- **The one-shot 0.1.2 migration keys are cleared once they've been read.** After the old `endpoint`/`endpoints`/`token` settings are migrated into profiles they are reset to their defaults, so a stale endpoint (e.g. a `localhost:3676` left over from an earlier setup) or a leftover access token no longer lingers in GSettings where it could mislead a diagnosis. Only a value that still differs from its default is touched, so a clean install writes nothing.
 
 ## [0.1.4]
 
