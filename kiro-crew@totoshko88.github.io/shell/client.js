@@ -251,6 +251,13 @@ export class GatewayClient {
                 this._wsCancellable = null;
                 this._ws = ws;
                 this._backoff = 1;
+                // Soup caps an incoming frame at 128 KiB by default; the
+                // gateway's slots/dashboard frames exceed that (0.11+), so
+                // without this the very first frame trips
+                // "payload larger than max-incoming-payload-size", the socket
+                // closes, and the ghost sits on "Gateway offline" forever,
+                // reconnecting in a loop. 0 lifts the limit.
+                ws.set_max_incoming_payload_size(0);
                 this._setAuthError(false);
                 this._setOnline(true);
                 this._scheduleRefresh();
