@@ -4,9 +4,8 @@
  *
  * Control modes:
  *   'service'  the local kirocrew.service over systemd D-Bus
- *   'ssh'      the remote host's kirocrew.service, `sudo -n systemctl` over SSH
  *   'api'      a hand-run local `kirocrew gateway` (POST /api/shutdown)
- *   null       a read-only remote profile, or nothing known to control
+ *   null       nothing known to control
  * A unit is only controlled when it listens on the profile's port, so a
  * profile for one gateway can never stop another.
  */
@@ -17,7 +16,6 @@ import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js'
 
 import {GatewayService, isAuthDenied} from './service.js';
 import {isCancelled, logUnlessCancelled} from '../lib/cancel.js';
-import {usesSshControl} from '../lib/profiles.js';
 
 const WATCH_INTERVAL_S = 1;
 const STOP_WATCH_S = 30;
@@ -60,10 +58,6 @@ export class GatewayLifecycle {
     controlMode() {
         const conn = this._connection;
         const portMatches = this._svcPort === Number(conn.profile.port);
-        if (usesSshControl(conn.profile))
-            return this._svcActive !== null && portMatches ? 'ssh' : null;
-        if (!conn.isLocal)
-            return null;
         // A unit that is down while a gateway still answers on this port means
         // the gateway was started by hand: control that one through its API.
         if (this._service.installed && portMatches && !(DOWN.has(this._svcActive) && conn.client.online))
@@ -80,15 +74,14 @@ export class GatewayLifecycle {
         if (this._pendingOp)
             return true;
         const mode = this.controlMode();
-        if (mode === 'service' || mode === 'ssh')
+        if (mode === 'service')
             return this._svcActive === 'inactive' || this._svcActive === 'deactivating';
         return this._manualStopped && !this._connection.client.online;
     }
 
     /** Can the menu offer a Start for a stopped gateway? */
     canStart() {
-        const mode = this.controlMode();
-        return mode === 'service' || mode === 'ssh';
+        return this.controlMode() === 'service';
     }
 
     /** The Stop/Start menu entry right now: {label, action}, label null = hidden. */
@@ -98,7 +91,7 @@ export class GatewayLifecycle {
         if (this._pendingOp === 'start')
             return {label: _('Starting gateway…'), action: null};
         const mode = this.controlMode();
-        if (mode === 'service' || mode === 'ssh') {
+        if (mode === 'service') {
             switch (this._svcActive) {
                 case 'inactive':
                 case 'failed':
@@ -153,16 +146,8 @@ export class GatewayLifecycle {
         let active = null;
         let port = null;
         try {
-            if (conn.isLocal) {
-                active = await this._service.activeState();
-                port = active === null ? null : await this._service.port();
-            } else {
-                const probe = await conn.remote.probe(conn.profile);
-                if (probe?.loaded) {
-                    active = probe.active;
-                    port = probe.port;
-                }
-            }
+            active = await this._service.activeState();
+            port = active === null ? null : await this._service.port();
         } catch (e) {
             if (isCancelled(e))
                 throw e;
@@ -195,8 +180,6 @@ export class GatewayLifecycle {
         try {
             if (mode === 'service')
                 await this._service.stop();
-            else if (mode === 'ssh')
-                await conn.remote.runChecked(conn.profile, 'stop');
             else if (await conn.shutdownLocal())
                 this._manualStopped = true;
             else
@@ -213,14 +196,10 @@ export class GatewayLifecycle {
         if (this._pendingOp)
             return;
         const conn = this._connection;
-        const mode = this.controlMode();
         this._pendingOp = 'start';
         this._onChanged();
         try {
-            if (mode === 'ssh')
-                await conn.remote.runChecked(conn.profile, 'start');
-            else
-                await this._service.start();
+            await this._service.start();
         } catch (e) {
             this._failOp(e, _('Could not start the gateway'));
             return;
@@ -272,7 +251,7 @@ export class GatewayLifecycle {
         let elapsed = 0;
         this._watchId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, WATCH_INTERVAL_S, () => {
             elapsed += WATCH_INTERVAL_S;
-            // An SSH probe can take longer than a tick; never stack them.
+            // A service read can take longer than a tick; never stack them.
             if (this._watchBusy)
                 return GLib.SOURCE_CONTINUE;
             this._watchBusy = true;

@@ -20,6 +20,7 @@ import {IndicatorMenu} from './menu.js';
 import {Notifier} from './notifier.js';
 import {UpdateManager} from './updates.js';
 import {logUnlessCancelled} from '../lib/cancel.js';
+import {pruneRemoteProfiles} from '../lib/profileStore.js';
 import {
     STATE, ICON_NAME, STYLE_CLASS, aggregateState, targetSlotKey, activeSessionCount, menuRows
 } from '../lib/state.js';
@@ -55,7 +56,6 @@ export class Indicator {
         this._slots = [];
         this._state = STATE.OFFLINE;
         this._criticalNotice = false;
-        this._tunnelNotified = '';
         this._mintRefusedNotified = false;
         this._authErrorSince = 0;
         this._authGraceId = 0;
@@ -76,6 +76,7 @@ export class Indicator {
 
         this._notifier = new Notifier(ICON_NAME.error);
         this._confirmation = new Confirmation();
+        this._pruneRemoteProfiles();
         this._connection = new GatewayConnection(this._settings, {
             onSlots: slots => this._onSlots(slots),
             onNotification: note => this._onNotification(note),
@@ -83,8 +84,7 @@ export class Indicator {
             onUpdateProgress: progress => this._updates.onProgress(progress),
             onOnline: online => this._onOnline(online),
             onAuthError: () => this._recompute(),
-            onMintRefused: code => this._onMintRefused(code),
-            onTunnelState: (state, error) => this._onTunnelState(state, error)
+            onMintRefused: code => this._onMintRefused(code)
         });
         this._lifecycle = new GatewayLifecycle(this._connection, this._notifier, () => this._recompute());
         this._updates = new UpdateManager(this._connection, this._settings, this._notifier, {
@@ -143,7 +143,6 @@ export class Indicator {
             this._lifecycle.reset();
             this._updates.reset();
             this._slots = [];
-            this._tunnelNotified = '';
             this._lifecycle.refresh();
         }
         this._recompute();
@@ -166,15 +165,22 @@ export class Indicator {
             () => this._openUrl(this._connection.pageUrl('/')));
     }
 
-    _onTunnelState(state, error) {
-        // One notification per distinct ssh error, not one per retry.
-        if (state === 'down' && error !== this._tunnelNotified) {
-            this._tunnelNotified = error;
-            this._notifier.notify(_('SSH tunnel to %s is down').replace('%s', this._connection.profile.name), error);
-        }
-        this._updateHeader();
-        if (this._menu.isOpen)
-            this._refreshSessions();
+    /**
+     * Remote/SSH profiles left over from 0.1.5 and earlier are no longer
+     * handled by the extension. Drop them once and tell the user where remote
+     * machines live now, so a stale remote profile can't sit there doing
+     * nothing.
+     */
+    _pruneRemoteProfiles() {
+        const removed = pruneRemoteProfiles(this._settings);
+        if (removed === 0)
+            return;
+        this._notifier.notify(
+            _('Remote profiles moved to the dashboard'),
+            ngettext(
+                'Removed %d remote profile. Connect remote machines in the Kiro Crew dashboard under Settings → Remote Crew.',
+                'Removed %d remote profiles. Connect remote machines in the Kiro Crew dashboard under Settings → Remote Crew.',
+                removed).replace('%d', String(removed)));
     }
 
     _onSlots(slots) {
@@ -303,8 +309,6 @@ export class Indicator {
             return _('Starting gateway…');
         if (this._state === STATE.STOPPED && this._lifecycle.stopping)
             return _('Stopping gateway…');
-        if (this._state === STATE.OFFLINE && this._connection.tunnelDown)
-            return _('SSH tunnel down — retrying');
         // A fresh token rejection is usually transient — a gateway restart, or
         // the brief window while the session cookie re-exchanges. Read it as a
         // reconnect until it has clearly persisted, then name it plainly.
@@ -357,13 +361,7 @@ export class Indicator {
             return;
         }
         if (!this._connection.client.online) {
-            const lines = [{text: _('Gateway offline')}];
-            if (this._connection.tunnelDown) {
-                lines[0].text = _('SSH tunnel down — retrying');
-                if (this._connection.tunnelError)
-                    lines.push({text: this._connection.tunnelError, hint: true});
-            }
-            this._menu.showInfo(lines);
+            this._menu.showInfo([{text: _('Gateway offline')}]);
             return;
         }
         // Active slots missing from the recent list are pinned on top, so the

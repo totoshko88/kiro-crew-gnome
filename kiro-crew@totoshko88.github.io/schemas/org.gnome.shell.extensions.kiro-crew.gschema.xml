@@ -6,14 +6,7 @@
     <key name="profiles" type="aa{ss}">
       <default>[]</default>
       <summary>Gateway profiles</summary>
-      <description>One entry per gateway: id, name, host, port (the gateway's port on that host), token and kind (local or remote). Each gateway keeps its own token. A remote host is reached through an SSH tunnel whose local port is picked automatically. Empty means "migrate from the 0.1.2 settings on next start".</description>
-    </key>
-
-    <key name="tunnel-port" type="i">
-      <default>0</default>
-      <range min="0" max="65535"/>
-      <summary>Local end of the open SSH tunnel (read-only)</summary>
-      <description>Written by the extension: the 127.0.0.1 port the active remote profile's tunnel listens on, 0 when no tunnel is open. Picked automatically and never equal to the remote port. Settings reads it to open the remote dashboard.</description>
+      <description>One entry per gateway on this computer: id, name, port (the gateway's port) and token. Each gateway keeps its own token. Reach a gateway on another machine by connecting it in the Kiro Crew dashboard under Settings → Remote Crew. Empty means "migrate from the 0.1.2 settings on next start".</description>
     </key>
 
     <key name="active-profile" type="s">
