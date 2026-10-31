@@ -16,8 +16,6 @@ import Soup from 'gi://Soup';
 
 import {isCancelled} from './cancel.js';
 
-const DECODER = new TextDecoder('utf-8');
-
 function crewPath(name) {
     return GLib.build_filenamev([GLib.get_home_dir(), '.kiro', 'crew', name]);
 }
@@ -26,6 +24,7 @@ export class LocalBootstrap {
     constructor() {
         this._cancellable = new Gio.Cancellable();
         this._lastCode = '';
+        this._decoder = new TextDecoder('utf-8');
     }
 
     /**
@@ -80,7 +79,7 @@ export class LocalBootstrap {
             session.send_and_read_async(message, GLib.PRIORITY_DEFAULT, this._cancellable, (s, res) => {
                 try {
                     const bytes = s.send_and_read_finish(res);
-                    resolve({status: message.get_status(), text: DECODER.decode(bytes.get_data() ?? new Uint8Array())});
+                    resolve({status: message.get_status(), text: this._decoder.decode(bytes.get_data() ?? new Uint8Array())});
                 } catch (e) {
                     if (isCancelled(e))
                         reject(e);
@@ -95,7 +94,7 @@ export class LocalBootstrap {
         return new Promise((resolve, reject) => {
             Gio.File.new_for_path(crewPath('.local_secret')).load_contents_async(this._cancellable, (f, res) => {
                 try {
-                    resolve(DECODER.decode(f.load_contents_finish(res)[1]).trim());
+                    resolve(this._decoder.decode(f.load_contents_finish(res)[1]).trim());
                 } catch (e) {
                     if (isCancelled(e))
                         reject(e);
