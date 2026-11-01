@@ -23,17 +23,18 @@ import Gio from 'gi://Gio';
 import {isCancelled} from '../lib/cancel.js';
 import {refreshDelaySecs} from '../lib/token.js';
 
-const DECODER = new TextDecoder('utf-8');
-const ENCODER = new TextEncoder();
-const BACKOFF_MAX_S = 30;
-
 export class GatewayClient {
+    // Reconnect backoff never waits longer than this many seconds.
+    static BACKOFF_MAX_S = 30;
+
     /**
      * @param {() => {endpoint: string, token: string}} getConfig read on every
      *   request, so a profile switch applies to the next one
      */
     constructor(getConfig) {
         this._getConfig = getConfig;
+        this._decoder = new TextDecoder('utf-8');
+        this._encoder = new TextEncoder();
         this._session = new Soup.Session({timeout: 10});
         // Keep the session cookie the gateway hands back for the short-lived
         // query token, so auth survives that token's `exp` (gateway 0.11+).
@@ -164,7 +165,7 @@ export class GatewayClient {
                         const bytes = session.send_and_read_finish(result);
                         resolve({
                             status: message.get_status(),
-                            text: DECODER.decode(bytes.get_data() ?? new Uint8Array())
+                            text: this._decoder.decode(bytes.get_data() ?? new Uint8Array())
                         });
                     } catch (e) {
                         if (isCancelled(e))
@@ -181,7 +182,7 @@ export class GatewayClient {
         const message = Soup.Message.new(method, this._withToken(`${this._base()}${path}`));
         if (body !== null) {
             message.set_request_body_from_bytes('application/json',
-                new GLib.Bytes(ENCODER.encode(JSON.stringify(body))));
+                new GLib.Bytes(this._encoder.encode(JSON.stringify(body))));
         }
         const {status, text} = await this._send(message);
         if (status === Soup.Status.UNAUTHORIZED || status === Soup.Status.FORBIDDEN) {
@@ -264,7 +265,7 @@ export class GatewayClient {
                 this._wsSignalIds = [
                     ws.connect('message', (_c, type, bytes) => {
                         if (type === Soup.WebsocketDataType.TEXT)
-                            this._handleFrame(DECODER.decode(bytes.get_data()));
+                            this._handleFrame(this._decoder.decode(bytes.get_data()));
                     }),
                     ws.connect('closed', () => {
                         this._disconnectWsSignals();
@@ -303,7 +304,7 @@ export class GatewayClient {
         if (this._paused || this._reconnectId)
             return;
         const delay = this._backoff;
-        this._backoff = Math.min(this._backoff * 2, BACKOFF_MAX_S);
+        this._backoff = Math.min(this._backoff * 2, GatewayClient.BACKOFF_MAX_S);
         this._reconnectId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, delay, () => {
             this._reconnectId = 0;
             // A handshake that keeps failing on auth needs a FRESH token, not

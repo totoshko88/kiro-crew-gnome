@@ -85,8 +85,7 @@ export default class KiroCrewPrefs extends ExtensionPreferences {
         const updateGroup = new Adw.PreferencesGroup({
             title: _('Updates'),
             description: _('The release channel of the active gateway, mirrored from it. ' +
-                'Changing it asks that gateway to switch; the move takes effect on its next update. ' +
-                'Applies to a local profile or one with SSH control.')
+                'Changing it asks that gateway to switch; the move takes effect on its next update.')
         });
         page.add(updateGroup);
 

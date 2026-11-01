@@ -1,28 +1,26 @@
 /**
- * connection.js — the link to the active gateway profile: its client, its SSH
- * tunnel (remote profiles), its SSH control commands, and its token.
+ * connection.js — the link to the active gateway profile: its client, its
+ * local token bootstrap, and its token. Every profile is a gateway on this
+ * computer; remote machines are connected in the dashboard's Remote Crew.
  */
 
 import {GatewayClient} from './client.js';
-import {SshTunnel} from './tunnel.js';
 import {LocalBootstrap} from '../lib/localBootstrap.js';
-import {RemoteControl} from '../lib/remote.js';
 import {logUnlessCancelled} from '../lib/cancel.js';
-import {KIND, profileBaseUrl, usesTunnel, usesSshControl, reservedPorts} from '../lib/profiles.js';
+import {profileBaseUrl} from '../lib/profiles.js';
 import {slotName} from '../lib/state.js';
 import {readProfiles, readActiveProfile, migrateLegacyProfiles, setProfileToken} from '../lib/profileStore.js';
 
 /** What, when it changes, makes the profile a different gateway. */
 function connectionKey(p) {
-    return [p.id, p.kind, p.host, p.port].join('|');
+    return [p.id, p.port].join('|');
 }
 
 export class GatewayConnection {
     /**
      * @param {Gio.Settings} settings
      * @param {object} handlers onSlots, onNotification, onStatus,
-     *   onUpdateProgress, onOnline, onAuthError, onTunnelState — forwarded
-     *   from the client and the tunnel
+     *   onUpdateProgress, onOnline, onAuthError — forwarded from the client
      */
     constructor(settings, handlers) {
         this._settings = settings;
@@ -32,8 +30,6 @@ export class GatewayConnection {
         this._key = connectionKey(this._profile);
         this._mintingToken = false;
         this._bootstrap = new LocalBootstrap();
-        this._remote = new RemoteControl();
-        this._tunnel = new SshTunnel((state, error) => this._onTunnelState(state, error));
         this._client = new GatewayClient(() => ({endpoint: this.baseUrl, token: this._profile.token}));
     }
 
@@ -51,7 +47,6 @@ export class GatewayConnection {
             },
             onReauth: () => this._reauth()
         });
-        this._openTunnel();
         if (!this._profile.token)
             this.tryToken();
     }
@@ -64,33 +59,18 @@ export class GatewayConnection {
         return this._client;
     }
 
-    get remote() {
-        return this._remote;
-    }
-
     get baseUrl() {
-        return profileBaseUrl(this._profile, this._tunnel.port);
+        return profileBaseUrl(this._profile);
     }
 
-    get tunnelDown() {
-        return usesTunnel(this._profile) && this._tunnel.state === 'down';
-    }
-
-    get tunnelError() {
-        return this._tunnel.error;
-    }
-
-    /**
-     * Is this the gateway on this computer? Taken from the profile's kind,
-     * never from the URL: a tunnel listens on localhost too.
-     */
+    /** Every profile is the gateway on this computer. */
     get isLocal() {
-        return this._profile.kind === KIND.LOCAL;
+        return true;
     }
 
-    /** May its token and service be handled (locally, or over SSH)? */
+    /** Its token and service can always be handled locally. */
     get canControl() {
-        return this.isLocal || usesSshControl(this._profile);
+        return true;
     }
 
     profiles() {
@@ -125,7 +105,6 @@ export class GatewayConnection {
         const key = connectionKey(this._profile);
         if (key !== this._key) {
             this._key = key;
-            this._openTunnel();
             // A different gateway: drop the old one's session cookie so it
             // can't shadow the new profile's token on the next exchange.
             this._client.clearSession();
@@ -148,23 +127,18 @@ export class GatewayConnection {
     }
 
     /**
-     * Mint a token without a paste: the local bootstrap for the gateway on
-     * this computer, or the same bootstrap run on the remote host over SSH
-     * (its secret never leaves that host). A read-only remote profile gets
-     * neither, so this computer's secret is never sent to another gateway.
+     * Mint a token without a paste, through the local bootstrap for the
+     * gateway on this computer.
      */
     tryToken() {
-        if (this._mintingToken || !this.canControl)
+        if (this._mintingToken)
             return Promise.resolve(false);
         const id = this._profile.id;
         this._mintingToken = true;
-        const mint = this.isLocal
-            ? this._bootstrap.fetchToken(this._profile.port)
-            : this._remote.fetchToken(this._profile);
         // Storing the token rewrites the profile; reload() then reconnects.
         // Resolves true when the profile token changed (a reconnect is already
         // on its way), false otherwise (the caller may need to reconnect).
-        return mint.then(token => {
+        return this._bootstrap.fetchToken(this._profile.port).then(token => {
             this._mintingToken = false;
             if (this._profile.id !== id)
                 return false;
@@ -181,7 +155,7 @@ export class GatewayConnection {
             // it can point the user at the dashboard's CLI login link once,
             // instead of looping. A network error ('' with no refusal code)
             // is left to the normal reconnect path.
-            const code = this.isLocal ? this._bootstrap.lastCode : '';
+            const code = this._bootstrap.lastCode;
             if (code && code !== 'unreachable' && this._handlers.onMintRefused)
                 this._handlers.onMintRefused(code);
             return false;
@@ -193,20 +167,13 @@ export class GatewayConnection {
     }
 
     /**
-     * A reconnect tick while the gateway keeps rejecting our token: get a fresh
-     * one and reconnect with it. For a controllable profile that means minting
-     * (tryToken rewrites the profile, and reload() reconnects); either way we
-     * always reconnect so the backoff loop never stalls on a mint that minted
-     * nothing. Called from the client's reconnect timer, so it replaces the
-     * plain reconnect that tick rather than adding a second one.
+     * A reconnect tick while the gateway keeps rejecting our token: mint a
+     * fresh one and reconnect with it. If the mint produced a new token,
+     * reload() is already reconnecting with it; otherwise reconnect anyway so
+     * the backoff loop keeps turning and never stalls on a stale token.
      */
     _reauth() {
-        // Try for a fresh token first (controllable profiles). If the mint
-        // produced a new one, reload() is already reconnecting with it, so we
-        // don't reconnect again here. If it produced nothing — the same token,
-        // a refusal, a network error, or a read-only remote — reconnect anyway
-        // so the backoff loop keeps turning and never stalls on a stale token.
-        if (this.canControl && !this._mintingToken) {
+        if (!this._mintingToken) {
             this.tryToken().then(changed => {
                 if (!changed)
                     this._client.reconnectNow();
@@ -221,28 +188,7 @@ export class GatewayConnection {
         return this._bootstrap.shutdown(this._profile.port);
     }
 
-    _openTunnel() {
-        if (usesTunnel(this._profile))
-            this._tunnel.start(this._profile, reservedPorts(this.profiles()));
-        else
-            this._tunnel.stop();
-    }
-
-    _onTunnelState(state, error) {
-        // Published for the preferences window (Open dashboard, subtitles).
-        if (this._settings.get_int('tunnel-port') !== this._tunnel.port)
-            this._settings.set_int('tunnel-port', this._tunnel.port);
-        if (state === 'running')
-            this._client.reconnectNow();
-        this._handlers.onTunnelState(state, error);
-    }
-
     destroy() {
-        // The tunnel goes first: no ssh process may outlive disable().
-        this._tunnel.destroy();
-        if (this._settings.get_int('tunnel-port') !== 0)
-            this._settings.set_int('tunnel-port', 0);
-        this._remote.destroy();
         this._bootstrap.destroy();
         this._client.destroy();
     }

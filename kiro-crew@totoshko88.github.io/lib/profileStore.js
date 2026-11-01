@@ -55,6 +55,34 @@ function clearLegacyKeys(settings) {
     }
 }
 
+/**
+ * Drop profiles left over from the SSH-tunnel era (0.1.5 and earlier): any
+ * entry whose stored `kind` was 'remote' or whose `host` is a non-loopback
+ * address. Remote machines are connected in the dashboard's Remote Crew now,
+ * not in the extension. Returns the number removed so the caller can tell the
+ * user once; writes nothing when there is nothing to prune. A local profile is
+ * always kept — if pruning would empty the list, the default local profile is
+ * written and made active.
+ */
+export function pruneRemoteProfiles(settings) {
+    const raw = settings.get_value('profiles').deepUnpack();
+    const isRemote = p => {
+        const host = String(p.host ?? '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+        const nonLoopback = host && host !== 'localhost' && host !== '::1' &&
+            !/^127(\.\d{1,3}){3}$/.test(host);
+        return String(p.kind ?? '').trim() === 'remote' || nonLoopback;
+    };
+    const kept = raw.filter(p => !isRemote(p));
+    const removed = raw.length - kept.length;
+    if (removed === 0)
+        return 0;
+    const profiles = (kept.length ? kept : [defaultLocalProfile()]).map(normalizeProfile);
+    writeProfiles(settings, profiles);
+    if (!profiles.some(p => p.id === settings.get_string('active-profile')))
+        settings.set_string('active-profile', profiles[0].id);
+    return removed;
+}
+
 export function setProfileToken(settings, id, token) {
     const profiles = readProfiles(settings);
     const p = profiles.find(x => x.id === id);

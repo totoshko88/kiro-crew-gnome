@@ -10,7 +10,6 @@ import St from 'gi://St';
 import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {isCancelled, logUnlessCancelled} from '../lib/cancel.js';
-import {usesSshControl} from '../lib/profiles.js';
 import {updateInfoFromStatus, statusHasUpdateFields, activeProgress, isFailedStep} from '../lib/updateInfo.js';
 
 const CHANNELS = new Set(['stable', 'insider']);
@@ -73,7 +72,7 @@ export class UpdateManager {
         if (info?.update_available) {
             const v = versionOf(info);
             // An ellipsis when the click opens the update-command dialog.
-            const viaTerminal = !info.can_apply && !usesSshControl(this._connection.profile);
+            const viaTerminal = !info.can_apply;
             let label;
             if (!v)
                 label = info.update_required ? _('Update required') : _('Update available');
@@ -207,15 +206,14 @@ export class UpdateManager {
 
     /**
      * Apply an update. A gateway that manages its own install applies it
-     * (POST /api/update); a wheel/venv install with SSH control is updated on
-     * its host with `kirocrew update`. Any other install is updated from a
-     * terminal (see _offerCommand) — the extension runs no installer here.
+     * (POST /api/update); any other install is updated from a terminal (see
+     * _offerCommand) — the extension runs no installer here.
      */
     async _apply(info) {
         if (this._applying)
             return;
         const conn = this._connection;
-        if (!info.can_apply && !usesSshControl(conn.profile)) {
+        if (!info.can_apply) {
             this._offerCommand(info);
             return;
         }
@@ -223,12 +221,8 @@ export class UpdateManager {
         this._applying = true;
         this._hooks.onChanged();
         try {
-            if (info.can_apply) {
-                if (await conn.client.applyUpdate() === null)
-                    throw new Error(_('The gateway did not accept the update request.'));
-            } else {
-                await conn.remote.runChecked(conn.profile, 'update');
-            }
+            if (await conn.client.applyUpdate() === null)
+                throw new Error(_('The gateway did not accept the update request.'));
         } catch (e) {
             this._applying = false;
             if (isCancelled(e))

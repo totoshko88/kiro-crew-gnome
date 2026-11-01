@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6]
+
+Takes the SSH/sudo/curl remote-gateway machinery out of the extension. A GNOME Shell extension may not spawn external processes, raise privileges or open its own network connections, and the Kiro Crew gateway now manages remote machines itself — so the whole layer is gone and a profile is simply a gateway on this computer. Addresses the extensions.gnome.org review of 0.1.5.
+
+### Removed
+
+- **The SSH tunnel.** The extension no longer runs `ssh -N -L …` or supervises a tunnel process. To reach a gateway on another machine, connect it in the Kiro Crew dashboard under **Settings → Remote Crew**: the gateway opens and keeps that connection itself (an SSH or AWS SSM tunnel, bound to loopback). This is both the right division of labour and what the review required.
+- **SSH control of a remote host.** The `sudo -n systemctl …` stop/start/restart/update commands and the `curl … /api/token/local` token mint that ran over SSH are gone, together with the per-profile **Allow control over SSH** switch. No `sudo`, no `curl`, no `ssh` is ever spawned.
+- **Remote and tunnel settings.** A profile is now just `{name, port, token}` — the `host`, `kind` and `sshcontrol` fields and the `tunnel-port` GSettings key are removed.
+
+### Changed
+
+- **Profiles are local-only.** Each profile is a gateway on this computer, reached on `127.0.0.1`, and keeps the full menu (Stop/Start, Restart, Check for updates, release channel). More than one profile still makes sense for several gateways on different ports here. The preferences editor drops the host/kind/SSH rows and points you at the dashboard's Remote Crew for other machines.
+- **Upgrade cleanup.** On the first start after upgrading, any profile that earlier versions managed over SSH (a non-loopback host, or one marked remote) is removed, and a one-time notification says where remote machines live now. A local profile is always kept.
+
+### Internal
+
+- Deleted `shell/tunnel.js` and `lib/remote.js`; trimmed `lib/profiles.js`, `shell/connection.js`, `shell/lifecycle.js`, `shell/updates.js`, `shell/indicator.js` and `prefs/profiles.js` to the local-only paths. Module-scope constants in `lib/localBootstrap.js` and `shell/client.js` moved onto their classes, per the review's best-practices note.
+
 ## [0.1.5]
 
 Keeps the ghost connected across the short-lived access tokens that Kiro Crew gateway 0.11 introduced.
