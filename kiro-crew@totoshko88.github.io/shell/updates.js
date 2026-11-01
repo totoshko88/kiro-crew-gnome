@@ -5,8 +5,6 @@
  * (GET /api/update/check), and acts on it.
  */
 
-import St from 'gi://St';
-
 import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {isCancelled, logUnlessCancelled} from '../lib/cancel.js';
@@ -241,10 +239,10 @@ export class UpdateManager {
 
     /**
      * An install the gateway cannot update in place (a cli.sh or pipx one)
-     * names the command that updates it. Show that command, and copy it to the
-     * clipboard only when the user asks; it runs in the user's own terminal.
-     * Without a command (a container, a desktop app) open the dashboard's About
-     * page, which owns that install's update flow.
+     * names the command that updates it. Show that command in a dialog so the
+     * user can select and copy it, then run it in their own terminal. Without a
+     * command (a container, a desktop app) open the dashboard's About page,
+     * which owns that install's update flow.
      */
     _offerCommand(info) {
         const v = versionOf(info);
@@ -255,16 +253,12 @@ export class UpdateManager {
             this._hooks.openPage('/settings/about');
             return;
         }
-        this._hooks.confirm({
-            title,
-            description: `${_('The gateway can’t update itself while it runs. Update it by running this command in a terminal:')}\n\n${command}`,
-            actionLabel: _('Copy command')
-        }, () => {
-            St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, command);
-            this._notifier.notify(_('Update command copied'), info.requires_restart
-                ? _('Paste it into a terminal. When it finishes, choose Restart gateway in the Kiro Crew menu.')
-                : _('Paste it into a terminal to update the gateway.'));
-        });
+        const hint = info.requires_restart
+            ? `\n\n${_('When it finishes, choose Restart gateway in the Kiro Crew menu.')}`
+            : '';
+        const intro = _('The gateway can’t update itself while it runs. Select the command below and run it in a terminal:');
+        const description = `${intro}\n\n${command}${hint}`;
+        this._hooks.confirm({title, description, actionLabel: _('Close')}, () => {});
     }
 
     async _switchChannel(channel) {

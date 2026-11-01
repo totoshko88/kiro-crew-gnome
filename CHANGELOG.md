@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7]
+
+Drops the one remaining capability the extensions.gnome.org review flagged for scrutiny.
+
+### Removed
+
+- **Clipboard access (EGO-A-005).** The update-command dialog no longer copies anything: for an install the gateway can't update in place, it shows the command in a dialog for you to select and run in your own terminal. The extension no longer calls `St.Clipboard`, and the clipboard declaration is dropped from the description.
+
 ## [0.1.6]
 
 Takes the SSH/sudo/curl remote-gateway machinery out of the extension. A GNOME Shell extension may not spawn external processes, raise privileges or open its own network connections, and the Kiro Crew gateway now manages remote machines itself — so the whole layer is gone and a profile is simply a gateway on this computer. Addresses the extensions.gnome.org review of 0.1.5.

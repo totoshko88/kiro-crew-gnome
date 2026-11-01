@@ -30,10 +30,9 @@ This extension implements several security measures:
     (`POST /api/update`). For an install the gateway can't update in place
     (a `cli.sh` or pipx install), the extension runs no installer: it shows
     the command the gateway names for that install
-    (`remediation.command` of `GET /api/update/check`) in a dialog, and
-    writes it to the clipboard only when you press **Copy command**. You run
-    it in your own terminal. Without such a command it opens the dashboard's
-    About page. The clipboard is never read.
+    (`remediation.command` of `GET /api/update/check`) in a dialog so you can
+    select it and run it in your own terminal. Without such a command it opens
+    the dashboard's About page. The extension never accesses the clipboard.
   - **Release channel** switch calls `POST /api/update/channel` with the
     dashboard token.
   - **Clicking a desktop notification** marks that one note read
