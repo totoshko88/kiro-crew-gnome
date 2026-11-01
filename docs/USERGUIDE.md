@@ -163,9 +163,9 @@ Right-click (secondary button) opens the menu:
   - A `cli.sh` or pipx install (the usual one): the gateway can't replace
     itself while it runs, so the item reads **Update to _x.y.z_…** and opens
     a dialog with the gateway's own update command (the installer, on your
-    release channel). **Copy command** puts it on the clipboard; paste it into
-    a terminal, and when it finishes pick **Restart gateway**. The extension
-    never runs the installer itself.
+    release channel). Select the command, run it in a terminal, and when it
+    finishes pick **Restart gateway**. The extension never runs the installer
+    itself, and never touches your clipboard.
   - A container or the desktop app: you're pointed at the dashboard's
     *Settings → About*, which owns that update.
 
